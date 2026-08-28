@@ -509,22 +509,28 @@ Sent by the server to inform the client of its own user state. This event should
                 "fugiat"
             ],
             "currentBattle": {
-                "username": "tempor",
-                "password": "pariatur ad exercitation nulla",
-                "ip": "75bfc493-2b9d-495d-a453-06722fdca2ea",
-                "port": 18174040.3175354,
+                "battleId": "75bfc493-2b9d-495d-a453-06722fdca2ea",
+                "username": "reprehenderit Excepteur Lorem",
+                "password": "Excepteur adipisicing commodo ea eu",
+                "ips": [
+                    "d977:479d:a6ee:e542:6468:926b:d42f:d0d7",
+                    "d54d:1c1c:a376:2270:3184:3de0:cdd0:8265",
+                    "201.52.144.46"
+                ],
+                "port": 6121,
                 "engine": {
-                    "version": "officia exercitation nulla ex labore"
+                    "version": "Duis enim do veniam dolore"
                 },
                 "game": {
-                    "springName": "elit sunt"
+                    "springName": "pariatur"
                 },
                 "map": {
-                    "springName": "in labore est"
+                    "springName": "occaecat eu in"
                 }
             },
-            "currentLobby": "do aute esse",
+            "currentLobby": "tempor aliqua qui Ut",
             "clanInvites": [
+                "12345",
                 "12345",
                 "12345",
                 "12345"
@@ -533,24 +539,24 @@ Sent by the server to inform the client of its own user state. This event should
                 "state": "queuing",
                 "queues": [
                     {
-                        "id": "est tempor cillum culpa",
-                        "version": "reprehenderit"
+                        "id": "qui nostrud fugiat in",
+                        "version": "ut mollit"
                     },
                     {
-                        "id": "amet ut aute reprehenderit veniam",
-                        "version": "culpa nisi reprehenderit laboris deserunt"
+                        "id": "et cillum minim est commodo",
+                        "version": "tempor dolore in"
                     },
                     {
-                        "id": "magna aliqua nisi",
-                        "version": "nisi"
+                        "id": "elit sit velit Duis incididunt",
+                        "version": "Lorem"
                     },
                     {
-                        "id": "pariatur consectetur officia dolore do",
-                        "version": "in laborum amet"
+                        "id": "enim exercitation ipsum labore",
+                        "version": "dolor minim Duis consectetur nostrud"
                     },
                     {
-                        "id": "est non exercitation",
-                        "version": "sint et"
+                        "id": "adipisicing",
+                        "version": "dolore sed laborum aliqua"
                     }
                 ]
             }
@@ -658,9 +664,10 @@ export interface PartyState {
     }[];
 }
 export interface PrivateBattle {
+    battleId: BattleId;
     username: string;
     password: string;
-    ip: BattleId;
+    ips: string[];
     port: number;
     engine: {
         version: string;
