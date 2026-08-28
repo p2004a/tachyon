@@ -531,7 +531,7 @@
                         },
                         "friendIds": {
                             "type": "array",
-                            "items": { "type": "string" }
+                            "items": { "$ref": "#/definitions/userId" }
                         },
                         "outgoingFriendRequest": {
                             "type": "array",
@@ -561,13 +561,16 @@
                         },
                         "ignoreIds": {
                             "type": "array",
-                            "items": { "type": "string" }
+                            "items": { "$ref": "#/definitions/userId" }
                         },
                         "currentBattle": {
                             "$ref": "#/definitions/privateBattle"
                         },
                         "currentLobby": {
-                            "anyOf": [{ "type": "string" }, { "type": "null" }]
+                            "anyOf": [
+                                { "$ref": "#/definitions/lobbyId" },
+                                { "type": "null" }
+                            ]
                         },
                         "clanInvites": {
                             "type": "array",

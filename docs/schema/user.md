@@ -467,14 +467,12 @@ Sent by the server to inform the client of its own user state. This event should
                 ]
             },
             "invitedToParties": [],
-            "friendIds": [
-                "labore",
-                "dolore reprehenderit velit minim sunt",
-                "occaecat veniam",
-                "labore",
-                "Excepteur occaecat do esse mollit"
-            ],
+            "friendIds": [],
             "outgoingFriendRequest": [
+                {
+                    "to": {},
+                    "sentAt": {}
+                },
                 {
                     "to": {},
                     "sentAt": {}
@@ -500,35 +498,42 @@ Sent by the server to inform the client of its own user state. This event should
                 {
                     "from": {},
                     "sentAt": {}
+                },
+                {
+                    "from": {},
+                    "sentAt": {}
+                },
+                {
+                    "from": {},
+                    "sentAt": {}
+                },
+                {
+                    "from": {},
+                    "sentAt": {}
                 }
             ],
-            "ignoreIds": [
-                "veniam elit",
-                "velit pariatur cillum officia qui",
-                "in amet occaecat nostrud",
-                "fugiat"
-            ],
+            "ignoreIds": [],
             "currentBattle": {
                 "battleId": "75bfc493-2b9d-495d-a453-06722fdca2ea",
-                "username": "reprehenderit Excepteur Lorem",
-                "password": "Excepteur adipisicing commodo ea eu",
+                "username": "amet nulla",
+                "password": "quis eiusmod in ut veniam",
                 "ips": [
-                    "d977:479d:a6ee:e542:6468:926b:d42f:d0d7",
-                    "d54d:1c1c:a376:2270:3184:3de0:cdd0:8265",
-                    "201.52.144.46"
+                    "38c9:73c9:bfd1:63bc:f84a:6005:cd0c:8549",
+                    "15.28.128.124",
+                    "44.32.74.70"
                 ],
-                "port": 6121,
+                "port": 19974,
                 "engine": {
-                    "version": "Duis enim do veniam dolore"
+                    "version": "deserunt esse"
                 },
                 "game": {
-                    "springName": "pariatur"
+                    "springName": "labore in"
                 },
                 "map": {
-                    "springName": "occaecat eu in"
+                    "springName": "quis in veniam sed"
                 }
             },
-            "currentLobby": "tempor aliqua qui Ut",
+            "currentLobby": null,
             "clanInvites": [
                 "12345",
                 "12345",
@@ -536,29 +541,7 @@ Sent by the server to inform the client of its own user state. This event should
                 "12345"
             ],
             "matchmaking": {
-                "state": "queuing",
-                "queues": [
-                    {
-                        "id": "qui nostrud fugiat in",
-                        "version": "ut mollit"
-                    },
-                    {
-                        "id": "et cillum minim est commodo",
-                        "version": "tempor dolore in"
-                    },
-                    {
-                        "id": "elit sit velit Duis incididunt",
-                        "version": "Lorem"
-                    },
-                    {
-                        "id": "enim exercitation ipsum labore",
-                        "version": "dolor minim Duis consectetur nostrud"
-                    },
-                    {
-                        "id": "adipisicing",
-                        "version": "dolore sed laborum aliqua"
-                    }
-                ]
+                "state": "no_matchmaking"
             }
         }
     }
@@ -571,7 +554,7 @@ Sent by the server to inform the client of its own user state. This event should
 export type PrivateUser = User & {
     party: PartyState | null;
     invitedToParties: PartyState[];
-    friendIds: string[];
+    friendIds: UserId[];
     outgoingFriendRequest: {
         to: UserId;
         sentAt: UnixTime;
@@ -580,9 +563,9 @@ export type PrivateUser = User & {
         from: UserId;
         sentAt: UnixTime;
     }[];
-    ignoreIds: string[];
+    ignoreIds: UserId[];
     currentBattle?: PrivateBattle;
-    currentLobby: string | null;
+    currentLobby: LobbyId | null;
     clanInvites: ClanId[];
     matchmaking:
         | {
@@ -620,6 +603,7 @@ export type ClanId = string;
 export type PartyId = string;
 export type UnixTime = number;
 export type BattleId = string;
+export type LobbyId = string;
 
 export interface UserSelfEvent {
     type: "event";
