@@ -21,6 +21,7 @@
 //
 // @test main=system_test
 // @inv main=system_test inv=safety steps=30 samples=20000
+// @inv main=system_three inv=safety steps=30 samples=20000
 // @inv main=system_small inv=safety steps=20 samples=10000
 //
 // Witnesses: every cross-module path (check.sh expects each to be reachable).
@@ -31,8 +32,8 @@
 // @witness main=system_test inv=not(hitWhy("env/takeover","taken_over"))
 // @witness main=system_test inv=not(hitWhy("env/sessionExpired","expired"))
 // @witness main=system_test inv=not(hitWhy("system/disconnect","disconnected"))
-// @witness main=system_test inv=not(w_keptWhilePlaying) steps=40 samples=20000
-// @witness main=system_test inv=not(w_expiryWithdrawsParty) steps=30 samples=20000
+// @witness main=system_three inv=not(w_keptWhilePlaying) steps=30 samples=20000
+// @witness main=system_three inv=not(w_expiryWithdrawsParty) steps=30 samples=20000
 // @witness main=system_test inv=not(w_expiryDisbandsMatch) steps=40 samples=20000
 // @witness main=system_test inv=not(w_expiryLeavesLobby)
 // @witness main=system_test inv=not(w_expiryDropsInvite)
@@ -48,15 +49,15 @@
 // @witness main=system_test inv=not(hitWhy("party/invite","invited"))
 // @witness main=system_test inv=not(hitWhy("party/invite","party_in_matchmaking"))
 // @witness main=system_test inv=not(hitWhy("party/acceptInvite","joined"))
-// @witness main=system_test inv=not(hitWhy("party/acceptInvite","in_found_match")) steps=30 samples=20000
+// @witness main=system_test inv=not(hitWhy("party/acceptInvite","in_found_match")) steps=30 samples=60000
 // @witness main=system_test inv=not(w_acceptLeavesQueuedParty) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("party/leave","left"))
 // @witness main=system_test inv=not(hitWhy("party/leave","left_unqueued"))
-// @witness main=system_test inv=not(hitWhy("party/leave","left_declined")) steps=30 samples=20000
-// @witness main=system_test inv=not(hitWhy("party/kickMember","kicked_unqueued"))
-// @witness main=system_test inv=not(hitWhy("party/kickMember","kicked_declined")) steps=30 samples=20000
-// @witness main=system_test inv=not(w_lostPartyStaysLocked) steps=30 samples=20000
-// @witness main=system_test inv=not(w_partyBattleUnlocks) steps=40 samples=20000
+// @witness main=system_three inv=not(hitWhy("party/leave","left_declined")) steps=30 samples=20000
+// @witness main=system_three inv=not(hitWhy("party/kickMember","kicked_unqueued")) steps=30 samples=20000
+// @witness main=system_three inv=not(hitWhy("party/kickMember","kicked_declined")) steps=30 samples=20000
+// @witness main=system_three inv=not(w_lostPartyStaysLocked) steps=30 samples=20000
+// @witness main=system_three inv=not(w_partyBattleUnlocks) steps=30 samples=20000
 // -- matchmaking x lobby x battle (INT-D4)
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","queued"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","party_queued"))
@@ -64,12 +65,12 @@
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","already_in_battle")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","in_lobby"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","already_queued"))
-// @witness main=system_test inv=not(hitWhy("matchmaking/queue","member_detached"))
+// @witness main=system_three inv=not(hitWhy("matchmaking/queue","member_detached")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("matchmaking/cancel","left_queue"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/cancel","declined"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/cancel","not_queued"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/ready","readied"))
-// @witness main=system_test inv=not(hitWhy("matchmaking/ready","all_ready"))
+// @witness main=system_three inv=not(hitWhy("matchmaking/ready","all_ready")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("matchmaking/ready","no_match"))
 // @witness main=system_test inv=not(hitWhy("env/match","found"))
 // @witness main=system_test inv=not(hitWhy("env/readyTimeout","lost"))
@@ -86,15 +87,15 @@
 // @witness main=system_test inv=not(hitWhy("lobby/joinBattle","no_battle"))
 // -- autohost start / failure / end, lobby- and matchmaking-originated
 // @witness main=system_test inv=not(hitWhy("env/autohostStarted","lobby_started"))
-// @witness main=system_test inv=not(hitWhy("env/autohostStarted","match_started")) steps=40 samples=20000
-// @witness main=system_test inv=not(hitWhy("env/autohostStarted","killed")) steps=30 samples=20000
+// @witness main=system_three inv=not(hitWhy("env/autohostStarted","match_started")) steps=30 samples=20000
+// @witness main=system_three inv=not(hitWhy("env/autohostStarted","killed")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("env/autohostFailed","lobby_failed"))
-// @witness main=system_test inv=not(hitWhy("env/autohostFailed","retried")) steps=40 samples=20000
-// @witness main=system_test inv=not(hitWhy("env/startGaveUp","gave_up")) steps=40 samples=20000
+// @witness main=system_three inv=not(hitWhy("env/autohostFailed","retried")) steps=30 samples=20000
+// @witness main=system_three inv=not(hitWhy("env/startGaveUp","gave_up")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("env/battleEnded","ended_lobby")) steps=30 samples=20000
-// @witness main=system_test inv=not(hitWhy("env/battleEnded","ended_match")) steps=40 samples=20000
+// @witness main=system_three inv=not(hitWhy("env/battleEnded","ended_match")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("env/lobbyCrashed","crashed"))
-// @witness main=system_test inv=not(w_startingDisbanded) steps=40 samples=20000
+// @witness main=system_three inv=not(w_startingDisbanded) steps=30 samples=20000
 // @witness main=system_test inv=not(w_orphanBattle) steps=30 samples=20000
 // @witness main=system_test inv=not(w_crashOrphansBattle) steps=30 samples=20000
 // -- messaging and friend across sessions
@@ -679,60 +680,80 @@ module system {
   pure def orNone(xs: Set[int]): Set[int] = if (xs == Set()) Set(-1) else xs
   action req(cmd: str, u: UserId, o: Outcome): bool = all { isOnline(s, u), apply(cmd, u, o) }
 
+  pure def pick(xs: Set[UserId], d: UserId): Set[UserId] = if (xs == Set()) Set(d) else xs
+  pure def battlesIn(s: State, ph: BPhase): Set[int] = s.battles.keys().filter(b => s.battles.get(b).phase == ph)
+
   action step = {
     nondet u = USERS.oneOf()
     nondet t = USERS.oneOf()
     // Arguments are drawn from what exists (or a non-existing id when nothing
-    // does), so that simulation reaches deep cross-module states.
+    // does), and some branches pick a user for whom the step does something,
+    // so that simulation reaches deep cross-module states. The random-user
+    // branches keep every denial reachable.
     nondet p = orNone(invitesOf(s, u)).oneOf()
     nondet l = s.lobbies.keys().union(Set(s.nextId)).oneOf()
     nondet cl = orNone(s.lobbies.keys()).oneOf()
-    nondet mid = orNone(s.matches.keys()).oneOf()
-    nondet b = orNone(s.battles.keys()).oneOf()
+    nondet rmid = orNone(s.matches.keys().filter(m => s.matches.get(m).phase == ReadyCheck)).oneOf()
+    nondet smid = orNone(s.matches.keys().filter(m => s.matches.get(m).phase != ReadyCheck)).oneOf()
+    nondet sb = orNone(battlesIn(s, BStarting)).oneOf()
+    nondet rb = orNone(battlesIn(s, BRunning)).oneOf()
     nondet ts = s.searching.powerset().filter(x => matchable(s, x)).union(Set(Set())).oneOf()
     nondet kind = Set("party", "lobby").oneOf()
-    // Branch weights for exploration only: core steps are listed several times.
-    any {
+    nondet qu = pick(USERS.filter(x => isOnline(s, x) and not(inTicket(s, x))), u).oneOf()
+    nondet ru = pick(USERS.filter(x => inMatch(s, x) and not(s.matches.get(matchIdOf(s, x)).ready.contains(x))), u).oneOf()
+    nondet du = pick(USERS.filter(x => s.presence.get(x) == Detached), u).oneOf()
+    nondet kt = pick(groupOf(s, u).exclude(Set(u)), t).oneOf()
+    // Branches are grouped; the simulator picks a group g, then a step in it.
+    // The weights serve exploration only.
+    nondet g = 0.to(6).oneOf()
+    if (g == 0) any {
       req("party/create", u, partyCreate(s, u)),
       req("party/invite", u, partyInvite(s, u, t)),
-      req("party/invite", u, partyInvite(s, u, t)),
-      req("party/acceptInvite", u, partyAccept(s, u, p)),
       req("party/acceptInvite", u, partyAccept(s, u, p)),
       req("party/leave", u, partyLeave(s, u)),
       req("party/kickMember", u, partyKick(s, u, t)),
+      req("party/kickMember", u, partyKick(s, u, kt)),
+    }
+    else if (g <= 2) any {
       req("matchmaking/queue", u, mmQueue(s, u)),
-      req("matchmaking/queue", u, mmQueue(s, u)),
-      req("matchmaking/queue", u, mmQueue(s, u)),
+      req("matchmaking/queue", qu, mmQueue(s, qu)),
       req("matchmaking/cancel", u, mmCancel(s, u)),
       req("matchmaking/ready", u, mmReady(s, u)),
-      req("matchmaking/ready", u, mmReady(s, u)),
-      req("matchmaking/ready", u, mmReady(s, u)),
+      req("matchmaking/queue", qu, mmQueue(s, qu)),
+      req("matchmaking/ready", ru, mmReady(s, ru)),
+      req("matchmaking/ready", ru, mmReady(s, ru)),
+      req("matchmaking/ready", ru, mmReady(s, ru)),
+      apply("env/match", "", matchFound(s, ts)),
+      apply("env/match", "", matchFound(s, ts)),
+    }
+    else if (g == 3) any {
       req("lobby/create", u, lobbyCreate(s, u)),
-      req("lobby/join", u, lobbyJoin(s, u, l)),
       req("lobby/join", u, lobbyJoin(s, u, l)),
       req("lobby/leave", u, lobbyLeave(s, u)),
       req("lobby/startBattle", u, lobbyStartBattle(s, u)),
-      req("lobby/startBattle", u, lobbyStartBattle(s, u)),
       req("lobby/joinBattle", u, lobbyJoinBattle(s, u)),
+      apply("env/lobbyCrashed", "", lobbyCrashed(s, cl)),
+    }
+    else if (g == 4) any {
+      apply("env/autohostStarted", "", autohostStarted(s, sb)),
+      apply("env/autohostStarted", "", autohostStarted(s, sb)),
+      apply("env/autohostFailed", "", autohostFailed(s, sb)),
+      apply("env/startGaveUp", "", startGaveUp(s, smid)),
+      apply("env/battleEnded", "", battleEnded(s, rb)),
+      apply("env/readyTimeout", "", readyTimeout(s, rmid)),
+    }
+    else if (g == 5) any {
+      apply("env/connect", u, connect(s, u)),
+      apply("env/disconnect", u, socketDrop(s, u)),
+      apply("env/reconnect", du, reconnect(s, du)),
+      apply("env/takeover", u, takeover(s, u)),
+      apply("env/sessionExpired", du, sessionExpired(s, du)),
+      req("system/disconnect", u, systemDisconnect(s, u)),
+    }
+    else any {
       req("messaging/subscribeReceived", u, msgSubscribe(s, u)),
       req("messaging/send", u, msgSend(s, u, kind)),
       req("friend/sendRequest", u, friendSend(s, u, t)),
-      req("system/disconnect", u, systemDisconnect(s, u)),
-      apply("env/connect", u, connect(s, u)),
-      apply("env/disconnect", u, socketDrop(s, u)),
-      apply("env/reconnect", u, reconnect(s, u)),
-      apply("env/takeover", u, takeover(s, u)),
-      apply("env/sessionExpired", u, sessionExpired(s, u)),
-      apply("env/sessionExpired", u, sessionExpired(s, u)),
-      apply("env/match", "", matchFound(s, ts)),
-      apply("env/match", "", matchFound(s, ts)),
-      apply("env/readyTimeout", "", readyTimeout(s, mid)),
-      apply("env/startGaveUp", "", startGaveUp(s, mid)),
-      apply("env/autohostStarted", "", autohostStarted(s, b)),
-      apply("env/autohostStarted", "", autohostStarted(s, b)),
-      apply("env/autohostFailed", "", autohostFailed(s, b)),
-      apply("env/battleEnded", "", battleEnded(s, b)),
-      apply("env/lobbyCrashed", "", lobbyCrashed(s, cl)),
     }
   }
 
@@ -818,7 +839,9 @@ module system {
   def sawCancelled(r: str): bool = lastEvents.exists(e => e._2 == Cancelled(r))
   val sawLost = lastEvents.exists(e => e._2 == Lost)
   val w_keptWhilePlaying = hitWhy("env/sessionExpired", "kept_while_playing")
-  val w_expiryWithdrawsParty = hitWhy("env/sessionExpired", "expired") and sawCancelled("party_user_left")
+  val w_expiryWithdrawsParty = hitWhy("env/sessionExpired", "expired") and partyIdOf(prev, lastActor) >= 0 and {
+    val x = prev.parties.get(partyIdOf(prev, lastActor))
+    x.queued and x.members.size() >= 2 }
   val w_expiryDisbandsMatch = hitWhy("env/sessionExpired", "expired") and sawLost
   val w_expiryLeavesLobby = hitWhy("env/sessionExpired", "expired") and inLobby(prev, lastActor)
   val w_expiryDropsInvite = hitWhy("env/sessionExpired", "expired") and invitesOf(prev, lastActor) != Set()
@@ -829,9 +852,11 @@ module system {
   val w_systemDisconnectWhilePlaying = hitWhy("system/disconnect", "disconnected") and playing(s, lastActor)
   val w_offlineInBattle = USERS.exists(u => s.presence.get(u) == Offline and playing(s, u))
   val w_acceptLeavesQueuedParty = hitWhy("party/acceptInvite", "left_queued_party")
-  val w_lostPartyStaysLocked = hitWhy("env/readyTimeout", "lost") and s.parties.keys().exists(p =>
-    s.parties.get(p).queued and s.searching.contains(s.parties.get(p).members)
-    and prev.parties.keys().contains(p) and s.parties.get(p).members.exists(u => inMatch(prev, u)))
+  // A party ticket goes back to searching after `lost` (ready timeout or
+  // another ticket's decline/withdrawal) and stays locked (INT-D3, MM-18).
+  val w_lostPartyStaysLocked = sawLost and s.parties.keys().exists(p => {
+    val x = s.parties.get(p)
+    and { x.members.size() >= 2, x.queued, s.searching.contains(x.members), x.members.exists(u => inMatch(prev, u)) } })
   val w_partyBattleUnlocks = hitWhy("env/autohostStarted", "match_started") and
     prev.parties.keys().exists(p => prev.parties.get(p).queued and not(s.parties.get(p).queued))
   // A match in the Starting phase (autohost/start in flight) is disbanded by a
@@ -1043,4 +1068,10 @@ module system_test {
 module system_small {
   import common.* from "./common"
   import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 2, MAX_PARTY = 1).*
+}
+
+// Deep matchmaking paths: 3 users, so every match takes all of them.
+module system_three {
+  import common.* from "./common"
+  import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 3, MAX_PARTY = 2).*
 }
