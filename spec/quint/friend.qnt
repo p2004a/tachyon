@@ -9,33 +9,33 @@
 //
 // @test main=friend4
 // @inv main=friend4 inv=safety steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/list",Ok)) steps=30 samples=50000
-// @witness main=friend4 inv=not(newRequestSent) steps=30 samples=50000
-// @witness main=friend4 inv=not(autoAccepted) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_user"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("already_in_friendlist"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_request"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("outgoing_capacity_reached"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("incoming_capacity_reached"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/acceptRequest",Ok)) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("invalid_user"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("no_pending_request"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/rejectRequest",Ok)) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("invalid_user"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("no_pending_request"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/cancelRequest",Ok)) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_user"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_request"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/remove",Ok)) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/remove",Failed("invalid_user"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("friend/remove",Failed("not_in_friendlist"))) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("env/disconnect",NoReply)) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("env/connect",NoReply)) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("env/reconnect",NoReply)) steps=30 samples=50000
-// @witness main=friend4 inv=not(hit("env/sessionExpired",NoReply)) steps=30 samples=50000
-// @witness main=friend4 inv=not(eventLostInGrace) steps=30 samples=50000
-// @witness main=friend4 inv=not(eventDropped) steps=30 samples=50000
-// @witness main=friend4 inv=not(multipleFriends) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/list",Ok)) steps=30 samples=200000
+// @witness main=friend4 inv=not(newRequestSent) steps=30 samples=200000
+// @witness main=friend4 inv=not(autoAccepted) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_user"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("already_in_friendlist"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_request"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("outgoing_capacity_reached"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("incoming_capacity_reached"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/acceptRequest",Ok)) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("invalid_user"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("no_pending_request"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/rejectRequest",Ok)) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("invalid_user"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("no_pending_request"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/cancelRequest",Ok)) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_user"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_request"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/remove",Ok)) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/remove",Failed("invalid_user"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("friend/remove",Failed("not_in_friendlist"))) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("env/disconnect",NoReply)) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("env/connect",NoReply)) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("env/reconnect",NoReply)) steps=30 samples=200000
+// @witness main=friend4 inv=not(hit("env/sessionExpired",NoReply)) steps=30 samples=200000
+// @witness main=friend4 inv=not(eventLostInGrace) steps=30 samples=200000
+// @witness main=friend4 inv=not(eventDropped) steps=30 samples=200000
+// @witness main=friend4 inv=not(multipleFriends) steps=30 samples=200000
 // @verify main=friend3 inv=safety steps=2
 module friend {
   import common.* from "./common"
@@ -132,7 +132,7 @@ module friend {
       ok(befriend(dropRequest(s, t, u), u, t),
          deliver(s, t, RequestAccepted(u)).union(deliver(s, u, RequestAccepted(t))))
     // ASSUMPTION FRIEND-03: outgoing is checked before incoming.
-    else if (outgoingOf(s, u).size() > MAX_OUTGOING) deny(s, "outgoing_capacity_reached")
+    else if (outgoingOf(s, u).size() >= MAX_OUTGOING) deny(s, "outgoing_capacity_reached")
     else if (incomingOf(s, t).size() >= MAX_INCOMING) deny(s, "incoming_capacity_reached")
     else ok({ ...s, requests: s.requests.union(Set((u, t))) },
             deliver(s, t, RequestReceived(u)))

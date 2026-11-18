@@ -22,6 +22,7 @@
 // @witness main=messaging_test inv=not(bufferOverflowed)
 // @witness main=messaging_test inv=not(lastCmd=="env/sessionExpired")
 // @witness main=messaging_test inv=not(lastCmd=="env/reconnect")
+// @witness main=messaging_test inv=not(lastCmd=="env/takeover")
 // @verify main=messaging_test inv=safety steps=3
 module messaging {
   import common.* from "./common"
@@ -34,7 +35,7 @@ module messaging {
   // Request data.target: { type: "player", userId } | { type: "party" } | { type: "lobby" }
   type Target = ToPlayer(UserId) | ToParty | ToLobby
   // Event data.source: player{userId} | party{partyId, userId} | lobby{lobbyId, userId};
-  // userId is the sender in all three (MSG-05).
+  // userId is the sender in all three (MSG-06).
   type Source = SrcPlayer | SrcParty(PartyId) | SrcLobby(LobbyId)
   // subscribeReceived data.since, "default": { "type": "latest" }
   type Since = Latest | FromStart | Marker(MsgId)
@@ -185,13 +186,21 @@ module messaging {
     else { ...none(s), state: { ...s, sessions: s.sessions.set(u,
              { ...sess(s, u), connected: false, subscribed: false }) } }
 
-  // A new connection attaches to the live session (after a drop, or replacing
-  // the current socket: "a new connection replaces the old one"). The buffer
-  // survives; the subscription does not (MSG-A9; teiserver diverges, MSG-07).
+  // The socket comes back during the grace period (session.qnt env/reconnect).
+  // The buffer survives; the subscription does not (MSG-A9).
   pure def reconnect(s: State, u: UserId): Outcome =
-    if (not(online(s, u))) none(s)
+    if (not(online(s, u)) or sess(s, u).connected) none(s)
     else { ...none(s), state: { ...s, sessions: s.sessions.set(u,
              { ...sess(s, u), connected: true, subscribed: false }) } }
+
+  // A second connection replaces the attached one (design default "a new
+  // connection replaces the old one"; session.qnt env/takeover). Same rule as
+  // reconnect: the new socket starts unsubscribed (MSG-A9; teiserver keeps the
+  // old subscription, MSG-07).
+  pure def takeover(s: State, u: UserId): Outcome =
+    if (not(online(s, u)) or not(sess(s, u).connected)) none(s)
+    else { ...none(s), state: { ...s, sessions: s.sessions.set(u,
+             { ...sess(s, u), subscribed: false }) } }
 
   // Grace period ends while detached: the session and its buffer are gone, and
   // the lobby/party modules drop the user (cross-module).
@@ -208,8 +217,9 @@ module messaging {
 
   // ---- state machine ----
   // Client ghost (what a bar-lobby-like client holds): last marker it saw, the
-  // ids delivered since its last subscribe, and every id it ever saw.
-  type Client = { lastMarker: MsgId, log: List[MsgId], seen: Set[MsgId] }
+  // ids delivered since its last subscribe, every id it ever saw, and whether
+  // it has subscribed on its current socket (the client knows its own socket).
+  type Client = { lastMarker: MsgId, log: List[MsgId], seen: Set[MsgId], sub: bool }
 
   var s: State
   var lastCmd: str
@@ -225,6 +235,8 @@ module messaging {
   var lastDup: bool      // the replay re-sent something the client had seen
 
   pure def evId(e: Event): MsgId = match e { | Received(m) => m.id }
+  // Steps after which the user's client has a new socket or none.
+  pure val SOCKET_STEPS = Set("env/connect", "env/disconnect", "env/reconnect", "env/takeover", "env/sessionExpired")
 
   action apply(cmd: str, u: UserId, o: Outcome): bool = all {
     s' = o.state, lastCmd' = cmd, lastReply' = o.reply, lastEvents' = o.events,
@@ -235,11 +247,12 @@ module messaging {
       if (cmd == "messaging/subscribeReceived" and v == u and o.reply == Ok)
         { lastMarker: if (o.replay.length() > 0) o.replay[o.replay.length() - 1] else c.lastMarker,
           log: o.replay,
-          seen: o.replay.foldl(c.seen, (acc, id) => acc.union(Set(id))) }
+          seen: o.replay.foldl(c.seen, (acc, id) => acc.union(Set(id))), sub: true }
+      else if (cmd.in(SOCKET_STEPS) and v == u) { ...c, sub: false }
       else {
         val ids = o.events.filter(e => e._1 == v).map(e => evId(e._2))
         if (ids == Set()) c
-        else { lastMarker: theOne(ids, -1), log: c.log.append(theOne(ids, -1)),
+        else { ...c, lastMarker: theOne(ids, -1), log: c.log.append(theOne(ids, -1)),
                seen: c.seen.union(ids) }
       }
     }),
@@ -263,7 +276,7 @@ module messaging {
            msgs: Map(), nextId: 0, addressed: Set() },
     lastCmd' = "init", lastReply' = NoReply, lastEvents' = Set(), lastReplay' = [],
     lastMissed' = false, lastCaller' = "", lastTarget' = ToLobby, lastSince' = Latest,
-    clients' = USERS.mapBy(_ => { lastMarker: -1, log: [], seen: Set() }),
+    clients' = USERS.mapBy(_ => { lastMarker: -1, log: [], seen: Set(), sub: false }),
     lastHonest' = false, lastDup' = false,
   }
 
@@ -285,7 +298,8 @@ module messaging {
       // functions are no-ops elsewhere), so simulation does not idle.
       all { not(online(s, u)), doEnv("env/connect", u, connect(s, u)) },
       all { canRequest, doEnv("env/disconnect", u, disconnect(s, u)) },
-      all { online(s, u), doEnv("env/reconnect", u, reconnect(s, u)) },
+      all { online(s, u), not(sess(s, u).connected), doEnv("env/reconnect", u, reconnect(s, u)) },
+      all { canRequest, doEnv("env/takeover", u, takeover(s, u)) },
       all { online(s, u), not(sess(s, u).connected), doEnv("env/sessionExpired", u, sessionExpired(s, u)) },
       all { online(s, u), doEnv("env/membership", u, setMembership(s, u, l, p)) },
     }
@@ -346,7 +360,10 @@ module messaging {
 
   // Nothing is delivered to a client that is not connected and subscribed
   // (before subscribing, messages are only buffered).
-  val nothingBeforeSubscribe = lastEvents.forall(e => live(s, e._1))
+  // Stated twice: over the server's flag, and over the client's own knowledge
+  // that it subscribed on the socket it has now (catches a subscription that
+  // leaks onto a replacing socket, MSG-07).
+  val nothingBeforeSubscribe = lastEvents.forall(e => live(s, e._1) and clients.get(e._1).sub)
 
   val denialsInert = (lastReply != Ok and lastReply != NoReply) implies lastEvents == Set()
 
@@ -429,17 +446,19 @@ module messaging_test {
       .then(doEnv("env/reconnect", "b", reconnect(s, "b")))
       .then(doSend("c", ToPlayer("b"), 0))
       .expect(lastEvents == Set())                            // new socket not subscribed
-      .then(doSubscribe("b", Marker(1)))
+      .then(doSubscribe("b", Marker(1)))                      // b's own marker 0 fell out (cap 2)
       .expect(lastReplay == [2] and not(lastMissed))
-      .then(doEnv("env/reconnect", "b", reconnect(s, "b")))   // socket replaced again
+      .then(doEnv("env/takeover", "b", takeover(s, "b")))     // socket replaced
+      .then(doSend("a", ToPlayer("b"), 0))
+      .expect(lastReply == Ok and lastEvents == Set())          // replacing socket not subscribed
       .then(doSubscribe("b", Marker(clients.get("b").lastMarker)))
-      .expect(lastReplay == [] and not(lastMissed) and lastHonest and not(lastDup))
+      .expect(lastReplay == [3] and not(lastMissed) and lastHonest and not(lastDup))
       .then(doEnv("env/disconnect", "b", disconnect(s, "b")))
       .then(doSend("a", ToPlayer("b"), 0))
-      .then(doSend("a", ToPlayer("b"), 0))                     // cap 2: b's marker 2 dropped
+      .then(doSend("a", ToPlayer("b"), 0))                     // cap 2: b's marker 3 dropped
       .then(doEnv("env/reconnect", "b", reconnect(s, "b")))
       .then(doSubscribe("b", Marker(clients.get("b").lastMarker)))
-      .expect(lastReplay == [3, 4] and lastMissed and lastHonest and not(lastDup))
+      .expect(lastReplay == [4, 5] and lastMissed and lastHonest and not(lastDup))
 
   // Overflow and unknown markers: hasMissedMessages and a full replay.
   run missedTest =
