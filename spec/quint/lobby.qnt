@@ -8,6 +8,7 @@
 // @inv main=lobby_test inv=safety steps=30 samples=20000
 // @inv main=lobby_votes inv=safety steps=30 samples=10000
 // @inv main=lobby_queue inv=safety steps=30 samples=10000
+// @inv main=lobby_kick inv=safety steps=30 samples=10000
 //
 // Witnesses: each must be reachable (check.sh expects the invariant to fail).
 // @witness main=lobby_test inv=not(hit("lobby/create",Ok))
@@ -16,7 +17,7 @@
 // @witness main=lobby_test inv=not(hit("lobby/join",Failed("invalid_lobby_id")))
 // @witness main=lobby_test inv=not(hit("lobby/join",Failed("invalid_request")))
 // @witness main=lobby_votes inv=not(hit("lobby/join",Failed("banned")))
-// @witness main=lobby_test inv=not(hit("lobby/join",Failed("lobby_full")))
+// @witness main=lobby_queue inv=not(hit("lobby/join",Failed("lobby_full")))
 // @witness main=lobby_test inv=not(hit("lobby/leave",Ok))
 // @witness main=lobby_test inv=not(hit("lobby/leave",Failed("not_in_lobby")))
 // @witness main=lobby_test inv=not(hit("lobby/joinAllyTeam",Ok))
@@ -56,7 +57,7 @@
 // @witness main=lobby_votes inv=not(hit("lobby/voteSubmit",Ok))
 // @witness main=lobby_votes inv=not(hit("lobby/voteSubmit",Failed("not_in_lobby")))
 // @witness main=lobby_votes inv=not(hit("lobby/voteSubmit",Failed("invalid_vote_id")))
-// @witness main=lobby_votes inv=not(hit("lobby/voteSubmit",Failed("invalid_request")))
+// @witness main=lobby_kick inv=not(hit("lobby/voteSubmit",Failed("invalid_request")))
 // @witness main=lobby_votes inv=not(hit("lobby/voteCancel",Ok))
 // @witness main=lobby_votes inv=not(hit("lobby/voteCancel",Failed("not_in_lobby")))
 // @witness main=lobby_votes inv=not(hit("lobby/voteCancel",Failed("invalid_vote_id")))
@@ -79,7 +80,7 @@
 // @witness main=lobby_votes inv=not(sawVoteEnded("failed"))
 // @witness main=lobby_votes inv=not(sawVoteEnded("cancelled"))
 // @witness main=lobby_votes inv=not(sawVoteEnded("timeout"))
-// @witness main=lobby_votes inv=not(votedKickPassed)
+// @witness main=lobby_kick inv=not(votedKickPassed)
 // @witness main=lobby_test inv=not(sawListUpdated)
 // @witness main=lobby_test inv=not(sawListRemoved)
 // @witness main=lobby_test inv=not(sawListReset)
@@ -1073,11 +1074,20 @@ module lobby_votes {
                              "env/banExpired")).*
 }
 
-// Join queue and ally team reconfiguration: one ally team of capacity 1 or 2.
+// Join queue, ally team reconfiguration and lobby_full: one ally team of
+// capacity 1 or 2, at most 2 members.
 module lobby_queue {
   import common.* from "./common"
-  import lobby(USERS = Set("a", "b", "c"), ALLY_TEAMS = Set(0), CAPS = Set(1, 2), MAX_MEMBERS = 3,
+  import lobby(USERS = Set("a", "b", "c"), ALLY_TEAMS = Set(0), CAPS = Set(1, 2), MAX_MEMBERS = 2,
                ENABLED = Set("lobby/create", "lobby/join", "lobby/leave", "lobby/joinAllyTeam",
                              "lobby/spectate", "lobby/joinQueue", "lobby/update", "lobby/addBot",
                              "lobby/removeBot", "lobby/kickban", "lobby/unboss")).*
+}
+
+// Kick votes: only the steps that lead to a vote-decided kick.
+module lobby_kick {
+  import common.* from "./common"
+  import lobby(USERS = Set("a", "b", "c"), ALLY_TEAMS = Set(0), CAPS = Set(3), MAX_MEMBERS = 3,
+               ENABLED = Set("lobby/create", "lobby/join", "lobby/joinAllyTeam", "lobby/kickban",
+                             "lobby/voteSubmit")).*
 }
