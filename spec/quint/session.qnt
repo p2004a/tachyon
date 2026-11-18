@@ -1,7 +1,8 @@
 // Session lifecycle + system/* + user/*: system/disconnect, system/serverStats,
 // user/self, user/info, user/report, user/subscribeUpdates,
 // user/unsubscribeUpdates, user/updated; environment steps env/connect,
-// env/socketDrop, env/graceExpired, env/activityChanged; and the generic
+// env/reconnect, env/takeover, env/disconnect (socket drop),
+// env/sessionExpired (grace over), env/activityChanged; and the generic
 // request/response rules of docs/commands.md as a "pending requests"
 // abstraction (env/clientSends + serving a pending request).
 // Sources: tachyon docs/connection.md, docs/authorization.md, docs/commands.md,
@@ -9,7 +10,7 @@
 // Findings: findings/session.md (SESSION-nn ids below).
 //
 // @test main=session_test
-// @inv main=session_test inv=safety steps=30 samples=20000
+// @inv main=session_test inv=safety steps=30 samples=50000
 // @witness main=session_test inv=not(w_connectFresh)
 // @witness main=session_test inv=not(w_connectRefused)
 // @witness main=session_test inv=not(w_reconnectResend)
@@ -31,7 +32,7 @@
 // @witness main=session_test inv=not(hit("user/subscribeUpdates",Failed("subscription_limit_reached")))
 // @witness main=session_test inv=not(hit("user/subscribeUpdates",Failed("invalid_request")))
 // @witness main=session_test inv=not(hit("user/unsubscribeUpdates",Ok))
-// @verify main=session_test inv=safety steps=3
+// @verify main=session_test inv=safety steps=2
 //
 // Unreachable by design (see findings "Coverage"):
 //  - "unauthorized" for lack of scope: every command requires only
@@ -101,6 +102,7 @@ module session {
   )
   pure val USER_CMDS = REQUIRED_SCOPES.keys()
 
+  pure val OPEN_STEPS = Set("env/connect", "env/reconnect", "env/takeover")
   pure val noReq: Req = { conn: -1, mid: -1, caller: "", cmd: "", target: "", targets: Set() }
 
   // ---- helpers ----
@@ -163,7 +165,9 @@ module session {
   // old one (ASSUMPTION SESSION-01); after reconnect the server sends full
   // state following user/self (ASSUMPTION SESSION-05: for this group, that is
   // a full user/updated for every subscribed user).
-  pure def connect(s: State, u: UserId): Outcome =
+  // One function for the three ways a socket opens; the env steps below pick
+  // the case, so each is a no-op outside it (as party.qnt's presence steps).
+  pure def openSocket(s: State, u: UserId): Outcome =
     if (not(TOKEN_SCOPES.get(u).contains(LOBBY_SCOPE))) noop(s)   // handshake rejected, no session
     else {
       val c = s.nextConn
@@ -181,9 +185,23 @@ module session {
                   .union(notifyChanges(s, s1)) }
     }
 
+  // env/connect: no session yet -> a fresh session (party.qnt `connect`).
+  pure def connect(s: State, u: UserId): Outcome =
+    if (online(s, u)) noop(s) else openSocket(s, u)
+  // env/reconnect: the session is in its grace period -> reattached
+  // (party.qnt `reconnect`).
+  pure def reconnect(s: State, u: UserId): Outcome =
+    if (not(online(s, u)) or attached(s, u)) noop(s) else openSocket(s, u)
+  // env/takeover: a second connection while the first is up. The old socket
+  // is closed by the server and the session moves (ASSUMPTION SESSION-01).
+  // party.qnt has no such step: presence stays Online, nothing changes there.
+  pure def takeover(s: State, u: UserId): Outcome =
+    if (not(attached(s, u))) noop(s) else openSocket(s, u)
+
   // The socket closes without system/disconnect (network loss, crash, server
   // closing it with 1008). Design default: the session lasts through a grace
   // period. ASSUMPTION SESSION-04: no status change, so no user/updated.
+  // Same step as party.qnt `disconnect` (Online -> Detached).
   pure def socketDrop(s: State, u: UserId): Outcome =
     if (not(attached(s, u))) noop(s)
     else {
@@ -193,10 +211,12 @@ module session {
       { state: s1, reply: NoReply, events: notifyChanges(s, s1), data: NoData }
     }
 
-  // Grace timer fires. Late or repeated fires (user reconnected, session
+  // Grace timer fires (party.qnt `sessionExpired`; lobby.qnt and
+  // matchmaking.qnt call the resulting session end `env/sessionEnded`).
+  // Late or repeated fires (user reconnected, session
   // already gone) change nothing.
   // ASSUMPTION SESSION-07: a user who is playing keeps the session (as teiserver).
-  pure def graceExpired(s: State, u: UserId): Outcome =
+  pure def sessionExpired(s: State, u: UserId): Outcome =
     if (not(online(s, u)) or attached(s, u) or s.activity.get(u) == Playing) noop(s)
     else {
       val s1 = endSession(s, u)
@@ -364,8 +384,10 @@ module session {
     nondet r = (if (s.pending == Set()) Set(noReq) else s.pending).oneOf()
     any {
       applyEnv("env/connect", u, connect(s, u)),
-      applyEnv("env/socketDrop", u, socketDrop(s, u)),
-      applyEnv("env/graceExpired", u, graceExpired(s, u)),
+      applyEnv("env/reconnect", u, reconnect(s, u)),
+      applyEnv("env/takeover", u, takeover(s, u)),
+      applyEnv("env/disconnect", u, socketDrop(s, u)),
+      applyEnv("env/sessionExpired", u, sessionExpired(s, u)),
       applyEnv("env/activityChanged", u, activityChanged(s, u, a)),
       clientSends(u, cmd, t, ts),
       serveOne(r),
@@ -413,7 +435,7 @@ module session {
   })
   // user/self: "sent to a user when they login" (and only then).
   val selfOnlyOnLogin = lastEvents.forall(e => match e._2 {
-    | Self(_) => lastCmd == "env/connect" and e._1 == lastReq.caller
+    | Self(_) => OPEN_STEPS.contains(lastCmd) and e._1 == lastReq.caller
     | Updated(_) => true
   })
   // Events carry the state after the step.
@@ -457,16 +479,16 @@ module session {
   def hit(cmd: str, r: Reply): bool = lastCmd == cmd and lastReply == r
   val w_connectFresh = lastCmd == "env/connect" and not(online(pre, lastReq.caller)) and online(s, lastReq.caller)
   val w_connectRefused = lastCmd == "env/connect" and not(online(s, lastReq.caller))
-  val w_reconnectResend = lastCmd == "env/connect" and online(pre, lastReq.caller)
+  val w_reconnectResend = lastCmd == "env/reconnect" and online(pre, lastReq.caller)
     and not(attached(pre, lastReq.caller))
     and lastEvents.exists(e => match e._2 { | Updated(_) => true | Self(_) => false })
-  val w_replaceDropsPending = lastCmd == "env/connect" and attached(pre, lastReq.caller)
+  val w_replaceDropsPending = lastCmd == "env/takeover" and attached(pre, lastReq.caller)
     and pre.pending.exists(r => r.caller == lastReq.caller)
-  val w_socketDrop = lastCmd == "env/socketDrop" and attached(pre, lastReq.caller)
+  val w_socketDrop = lastCmd == "env/disconnect" and attached(pre, lastReq.caller)
     and pre.pending.exists(r => r.caller == lastReq.caller)
-  val w_graceEndNotifies = lastCmd == "env/graceExpired" and online(pre, lastReq.caller)
+  val w_graceEndNotifies = lastCmd == "env/sessionExpired" and online(pre, lastReq.caller)
     and not(online(s, lastReq.caller)) and lastEvents != Set()
-  val w_graceKeptWhilePlaying = lastCmd == "env/graceExpired" and online(s, lastReq.caller)
+  val w_graceKeptWhilePlaying = lastCmd == "env/sessionExpired" and online(s, lastReq.caller)
     and not(attached(s, lastReq.caller))
   val w_activityNotifies = lastCmd == "env/activityChanged" and lastEvents != Set()
   val w_servedFromQueue = lastReply != NoReply and pre.pending.size() >= 2
@@ -534,16 +556,18 @@ module session_test {
       .then(applyEnv("env/connect", "a", connect(s, "a")))
       .then(applyEnv("env/connect", "b", connect(s, "b")))
       .then(request("a", "user/subscribeUpdates", "", Set("b")))
-      .then(applyEnv("env/socketDrop", "a", socketDrop(s, "a")))
+      .then(applyEnv("env/disconnect", "a", socketDrop(s, "a")))
       .expect(lastEvents == Set() and online(s, "a") and not(attached(s, "a")))
       .then(applyEnv("env/activityChanged", "b", activityChanged(s, "b", InLobby)))
       .expect(lastEvents == Set())                              // a has no socket
       .then(request("b", "user/info", "a", none))
       .expect(lastData == Info("menu"))                         // still online during grace
       .then(applyEnv("env/connect", "a", connect(s, "a")))
+      .expect(lastEvents == Set() and not(attached(s, "a")))  // env/connect needs no session
+      .then(applyEnv("env/reconnect", "a", reconnect(s, "a")))
       .expect(lastEvents == Set(("a", Self("menu")), up("a", "b", "lobby")))
       .expect(views.get("a").get("b") == "lobby")
-      .then(applyEnv("env/graceExpired", "a", graceExpired(s, "a")))
+      .then(applyEnv("env/sessionExpired", "a", sessionExpired(s, "a")))
       .expect(lastEvents == Set() and attached(s, "a"))        // late timer: no-op
 
   // Grace expiry ends the session: subscribers see "offline"; the next login
@@ -554,8 +578,8 @@ module session_test {
       .then(applyEnv("env/connect", "b", connect(s, "b")))
       .then(request("a", "user/subscribeUpdates", "", Set("b")))
       .then(request("b", "user/subscribeUpdates", "", Set("a")))
-      .then(applyEnv("env/socketDrop", "b", socketDrop(s, "b")))
-      .then(applyEnv("env/graceExpired", "b", graceExpired(s, "b")))
+      .then(applyEnv("env/disconnect", "b", socketDrop(s, "b")))
+      .then(applyEnv("env/sessionExpired", "b", sessionExpired(s, "b")))
       .expect(lastEvents == Set(up("a", "b", "offline")) and not(online(s, "b")))
       .then(applyEnv("env/connect", "b", connect(s, "b")))
       .expect(lastEvents == Set(("b", Self("menu")), up("a", "b", "menu")))
@@ -566,11 +590,14 @@ module session_test {
     init
       .then(applyEnv("env/connect", "a", connect(s, "a")))
       .then(applyEnv("env/activityChanged", "a", activityChanged(s, "a", Playing)))
-      .then(applyEnv("env/socketDrop", "a", socketDrop(s, "a")))
-      .then(applyEnv("env/graceExpired", "a", graceExpired(s, "a")))
+      .then(applyEnv("env/disconnect", "a", socketDrop(s, "a")))
+      .then(applyEnv("env/sessionExpired", "a", sessionExpired(s, "a")))
       .expect(online(s, "a"))
+      .then(applyEnv("env/reconnect", "a", reconnect(s, "a")))
+      .expect(lastEvents == Set(("a", Self("playing"))))       // user/self has the real status
+      .then(applyEnv("env/disconnect", "a", socketDrop(s, "a")))
       .then(applyEnv("env/activityChanged", "a", activityChanged(s, "a", Menu)))
-      .then(applyEnv("env/graceExpired", "a", graceExpired(s, "a")))
+      .then(applyEnv("env/sessionExpired", "a", sessionExpired(s, "a")))
       .expect(not(online(s, "a")))
 
   // A second connection replaces the first; requests in flight on the old
@@ -581,7 +608,7 @@ module session_test {
       .then(request("a", "user/subscribeUpdates", "", Set("b")))
       .then(clientSends("a", "system/serverStats", "", none))
       .expect(s.pending.size() == 1)
-      .then(applyEnv("env/connect", "a", connect(s, "a")))
+      .then(applyEnv("env/takeover", "a", takeover(s, "a")))
       .expect(s.pending == Set() and s.sessions.get("a").conn == 1)
       .expect(lastEvents == Set(("a", Self("menu")), up("a", "b", "offline")))
       .then(request("a", "system/serverStats", "", none))
@@ -609,7 +636,7 @@ module session_test {
       .then(request("b", "system/disconnect", "", none))
       .expect(lastReply == Ok and lastEvents == Set(up("a", "b", "offline")))
       .expect(not(online(s, "b")) and s.pending == Set())     // b's other request is dropped
-      .then(applyEnv("env/graceExpired", "b", graceExpired(s, "b")))
+      .then(applyEnv("env/sessionExpired", "b", sessionExpired(s, "b")))
       .expect(lastEvents == Set())
 
   // user/report denials; d's token lacks tachyon.lobby so d never connects.

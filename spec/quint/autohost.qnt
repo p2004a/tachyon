@@ -259,7 +259,7 @@ module autohost {
   pure def canSendKill(s: State, id: BattleId): bool =
     id.in(s.battles.keys()) and {
       val b = s.battles.get(id)
-      and { b.phase == PRunning or dropped(b), b.mayRun, s.hosts.get(b.host).conn == Up,
+      and { b.phase != PStarting, b.mayRun, s.hosts.get(b.host).conn == Up,
             not(inFlight(s, START, id)), not(inFlight(s, KILL, id)) }
     }
   pure def sendKill(s: State, id: BattleId): Outcome =
@@ -462,7 +462,9 @@ module autohost {
             noop(withBattle(s1, n.battle, { ...b1, reports: b.reports.put(n.user, n.team) }))
           else if (ends) {
             val w = majority(b, TEAMS)
-            { state: withBattle(s1, n.battle, { ...b1, phase: PEnded, mayRun: false, result: w,
+            // AH-12: with several start attempts this may be an earlier
+            // engine's quit; keep the kill obligation (kill confirms).
+            { state: withBattle(s1, n.battle, { ...b1, phase: PEnded, mayRun: b.attempts > 1, result: w,
                                                 recorded: b.recorded + 1 }),
               reply: NoReply, events: send(participants(b), BattleEnded((n.battle, w))) }
           }
@@ -471,7 +473,8 @@ module autohost {
           // Not running on the server side (PStarting, Failed, PLost, PEnded):
           // only engine_quit/crash matter: nothing runs any more (unless a
           // start request is still in flight).
-          val clear = ends and not(inFlight(s, START, n.battle))
+          // AH-12: only unambiguous if a single start was ever sent.
+          val clear = ends and b.attempts == 1 and not(inFlight(s, START, n.battle))
           noop(withBattle(s1, n.battle, { ...b, lastTime: n.time,
                                           mayRun: if (clear) false else b.mayRun }))
         }
@@ -635,7 +638,7 @@ module autohost {
   // A dropped battle the autohost may run always has a kill path while connected.
   val droppedKillable = s.battles.keys().forall(id => {
     val b = s.battles.get(id)
-    (dropped(b) and b.mayRun and s.hosts.get(b.host).conn == Up) implies
+    (b.phase != PStarting and b.phase != PRunning and b.mayRun and s.hosts.get(b.host).conn == Up) implies
       (canSendKill(s, id) or inFlight(s, KILL, id) or inFlight(s, START, id))
   })
 
@@ -690,7 +693,7 @@ module autohost {
 
   val wellFormed = s.battles.keys().forall(id => {
     val b = s.battles.get(id)
-    and { b.phase == PEnded implies not(b.mayRun),
+    and { (b.phase == PEnded and b.attempts == 1) implies not(b.mayRun),
           b.phase == PRunning implies not(b.startTimer),
           b.players.intersect(b.spectators) == Set() }
   })
@@ -921,6 +924,7 @@ module autohost_test {
 // Simulation instance starting connected (the connect handshake is covered by
 // autohost_test): most witnesses run here so random runs reach deep states.
 module autohost_up {
+  import common.* from "./common"
   import autohost(USERS = Set("a", "b", "c"), HOSTS = Set("h1"), BATTLE_IDS = Set(1, 2),
                   ENGINES = Set("e1", "e2"), INITIAL_ENGINES = Set("e1"), TEAMS = Set(0, 1),
                   MAX_BATTLES = 1, INIT_UP = true, CHURN = 3).*
@@ -928,6 +932,7 @@ module autohost_up {
 
 // Two autohosts: battles on both, independent connections.
 module autohost_two {
+  import common.* from "./common"
   import autohost(USERS = Set("a", "b", "c"), HOSTS = Set("h1", "h2"), BATTLE_IDS = Set(1, 2, 3),
                   ENGINES = Set("e1", "e2"), INITIAL_ENGINES = Set("e1"), TEAMS = Set(0, 1),
                   MAX_BATTLES = 1, INIT_UP = false, CHURN = 3).*
@@ -935,6 +940,7 @@ module autohost_two {
 
 // Smallest instance for Apalache.
 module autohost_small {
+  import common.* from "./common"
   import autohost(USERS = Set("a", "b"), HOSTS = Set("h1"), BATTLE_IDS = Set(1),
                   ENGINES = Set("e1"), INITIAL_ENGINES = Set("e1"), TEAMS = Set(0),
                   MAX_BATTLES = 1, INIT_UP = true, CHURN = 0).*
