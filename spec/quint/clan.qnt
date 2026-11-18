@@ -81,6 +81,10 @@ module clan {
 
   const USERS: Set[UserId]
   const PROFILES: Set[str]
+  // Simulation knob, not protocol: false disables clan/delete, clan/kick and
+  // non-leader clan/leave in `step` so that random runs grow clans deep enough to
+  // reach the co-leader witnesses. Every check with CHURN = true still runs.
+  const CHURN: bool
 
   // ---- helpers ----
   pure def clansOf(s: State, u: UserId): Set[ClanId] =
@@ -292,13 +296,13 @@ module clan {
     any {
       apply("clan/create", u, create(s, u, p)),
       apply("clan/update", u, update(s, u, p)),
-      apply("clan/delete", u, delete(s, u)),
+      all { CHURN, apply("clan/delete", u, delete(s, u)) },
       apply("clan/invite", u, invite(s, u, t)),
       apply("clan/cancel", u, cancel(s, u, t)),
       apply("clan/accept", u, accept(s, u, c)),
       apply("clan/decline", u, decline(s, u, c)),
-      apply("clan/kick", u, kick(s, u, t)),
-      apply("clan/leave", u, leave(s, u)),
+      all { CHURN, apply("clan/kick", u, kick(s, u, t)) },
+      all { CHURN or roleOf(s, u) == "leader", apply("clan/leave", u, leave(s, u)) },
       apply("clan/setRole", u, setRole(s, u, t, c, r)),
       apply("clan/view", u, view(s, u, c)),
       apply("clan/viewList", u, viewList(s, u)),
@@ -455,7 +459,7 @@ module clan {
 
 module clan_test {
   import common.* from "./common"
-  import clan(USERS = Set("a", "b", "c"), PROFILES = Set("p1", "p2")).*
+  import clan(USERS = Set("a", "b", "c"), PROFILES = Set("p1", "p2"), CHURN = true).*
 
   // Reviewed transcript: create, invite, accept, promote, update, transfer, delete.
   run lifecycleTest =
@@ -579,4 +583,10 @@ module clan_test {
       .then(apply("clan/setRole", "a", setRole(s, "a", "b", 0, "coLeader")))
       .then(apply("clan/setRole", "a", setRole(s, "a", "b", 0, "member")))
       .expect(lastEvents == Set(("b", RoleChanged({ clan: 0, user: "b", role: "member" }))))
+}
+
+// Same constants with CHURN = false: used only by the deep reachability witnesses.
+module clan_grow {
+  import common.* from "./common"
+  import clan(USERS = Set("a", "b", "c"), PROFILES = Set("p1", "p2"), CHURN = false).*
 }

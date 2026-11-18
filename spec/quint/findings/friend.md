@@ -20,10 +20,10 @@ does not change friend state and resets the view like `env/reconnect`).
 Constants (`friend4`): users a, b, c, d; `GHOST = "x"` (well-formed id of no user); `MAX_OUTGOING = 2`,
 `MAX_INCOMING = 1` (different, so a swap is detectable). `friend3`: a, b, c, both caps 1.
 
-Check results: `./check.sh friend.qnt` 31/31 ok (typecheck, 7 transcripts, `safety` 30 steps x 50000
-samples, 27 witnesses), about 1m45s. `VERIFY=1`: `quint verify --main=friend3 --invariant=safety
---max-steps=2` passes, 208 s (JVM_ARGS=-Xmx6G, with another Apalache run in parallel); 3 steps was not tried
-within the time budget.
+Check results: `./check.sh friend.qnt` 30/30 ok (typecheck, 1 test module with 7 transcripts, `safety` 30
+steps x 50000 samples, 27 witnesses at 30 steps x up to 200000 samples), about 2 min. `VERIFY=1`:
+`quint verify --main=friend3 --invariant=safety --max-steps=2` passes in 208 s (JVM_ARGS=-Xmx6G, with another
+Apalache run in parallel); 3 steps was not attempted within the time budget.
 
 ## Findings
 
@@ -257,7 +257,7 @@ within the time budget.
 ## Seeded mutations
 
 All run with `quint test --main=friend4` and `quint run --invariant=safety --max-steps=30 --max-samples=50000`,
-then reverted (file identical to the checked one).
+then reverted (file byte-identical to the checked one before the final samples tweak).
 
 | # | Mutation (one line) | Caught by |
 |---|---|---|
