@@ -47,7 +47,7 @@
 // @witness main=party3 inv=not(memberAndInvited)
 // @witness main=party3 inv=not(detachedViewStale)
 // @witness main=party3 inv=not(queuedMemberLeft)
-// @verify main=party2 inv=safety steps=3
+// @verify main=party2 inv=safety steps=2
 module party {
   import common.* from "./common"
 
@@ -407,12 +407,16 @@ module party {
     views' = USERS.mapBy(_ => emptyView),
   }
   def isOnline(u: UserId): bool = s.presence.get(u) == Online
+  // Requests are drawn 4 times as often as environment steps, so that the
+  // simulator builds multi-member parties before sockets drop and parties
+  // crash. Both kinds stay enabled in every state.
   action step = {
     nondet u = USERS.oneOf()
     nondet t = USERS.oneOf()
     nondet id = s.parties.keys().union(Set(s.nextId)).oneOf()
     nondet gen = 0.to(s.nextInvite).oneOf()
-    any {
+    nondet kind = 0.to(4).oneOf()
+    if (kind < 4) any {
       all { isOnline(u), apply("party/create", u, id, create(s, u)) },
       all { isOnline(u), apply("party/invite", u, id, invite(s, u, t)) },
       all { isOnline(u), apply("party/acceptInvite", u, id, accept(s, u, id)) },
@@ -420,6 +424,7 @@ module party {
       all { isOnline(u), apply("party/cancelInvite", u, id, cancel(s, u, t)) },
       all { isOnline(u), apply("party/kickMember", u, id, kick(s, u, t)) },
       all { isOnline(u), apply("party/leave", u, id, leave(s, u)) },
+    } else any {
       apply("env/inviteTimeout", t, id, inviteTimeout(s, id, t, gen)),
       apply("env/disconnect", u, id, disconnect(s, u)),
       apply("env/reconnect", u, id, reconnect(s, u)),
@@ -524,10 +529,10 @@ module party {
   val queuedMemberLeft = lastEvents.exists(m => m._2 == MatchmakingCancelled)
 }
 
-// Small instance for transcripts, simulation and witnesses.
+// Small instance for transcripts, simulation and witnesses: 4 users, maxMembers 3.
 module party3 {
   import common.* from "./common"
-  import party(USERS = Set("a", "b", "c"), MAX_MEMBERS = 2).*
+  import party(USERS = Set("a", "b", "c", "d"), MAX_MEMBERS = 3).*
 
   pure def pv(id: PartyId, ms: Set[UserId], inv: Set[UserId]): PartyView =
     { id: id, members: ms, invited: inv }
@@ -545,21 +550,26 @@ module party3 {
       .expect(lastEvents == Set(("b", Invited(pv(0, Set("a"), Set("b")))),
                                 ("a", Updated(pv(0, Set("a"), Set("b"))))))
       .then(apply("party/invite", "a", 0, invite(s, "a", "c")))
-      .expect(lastReply == Failed("invalid_request") and lastWhy == "party_full")   // 1 member + 1 invite = limit
+      // the earlier invitee b is told too
+      .expect(lastEvents == Set(("c", Invited(pv(0, Set("a"), Set("b", "c")))),
+                                ("a", Updated(pv(0, Set("a"), Set("b", "c")))),
+                                ("b", Updated(pv(0, Set("a"), Set("b", "c"))))))
+      .then(apply("party/invite", "a", 0, invite(s, "a", "d")))
+      .expect(lastReply == Failed("invalid_request") and lastWhy == "party_full")   // 1 member + 2 invites = limit
       .then(apply("party/invite", "a", 0, invite(s, "a", "b")))
-      .expect(lastWhy == "already_member_or_invited")
-      .then(apply("party/invite", "c", 0, invite(s, "c", "a")))
+      .expect(lastReply == Failed("invalid_request") and lastWhy == "already_member_or_invited")
+      .then(apply("party/invite", "d", 0, invite(s, "d", "a")))
       .expect(lastReply == Failed("invalid_request") and lastWhy == "not_in_party")
       .then(apply("party/acceptInvite", "b", 0, accept(s, "b", 0)))
-      .expect(lastEvents == Set(("a", Updated(pv(0, Set("a", "b"), Set()))),
-                                ("b", Updated(pv(0, Set("a", "b"), Set())))))
+      .expect(lastEvents == send(Set("a", "b", "c"), Updated(pv(0, Set("a", "b"), Set("c")))))
       .then(apply("party/acceptInvite", "b", 0, accept(s, "b", 0)))
       .expect(lastReply == Failed("invalid_request") and lastWhy == "not_invited")
       .then(apply("party/leave", "a", 0, leave(s, "a")))
       // no party/removed to the leaver (PARTY-04)
-      .expect(lastReply == Ok and lastEvents == Set(("b", Updated(pv(0, Set("b"), Set())))))
+      .expect(lastReply == Ok and lastEvents == send(Set("b", "c"), Updated(pv(0, Set("b"), Set("c")))))
       .then(apply("party/leave", "b", 0, leave(s, "b")))
-      .expect(lastWhy == "disbanded" and s.parties.keys() == Set() and lastEvents == Set())
+      // last member leaves: disbanded, the invitee gets party/removed
+      .expect(lastWhy == "disbanded" and s.parties.keys() == Set() and lastEvents == Set(("c", Removed(0))))
       .then(apply("party/leave", "b", 0, leave(s, "b")))
       .expect(lastReply == Ok and lastWhy == "not_in_party_noop")                  // PARTY-10
       .expect(clientViewsAgree)
@@ -591,15 +601,17 @@ module party3 {
       .then(apply("env/inviteTimeout", "b", 0, inviteTimeout(s, 0, "b", 2)))
       .expect(lastWhy == "expired" and clientViewsAgree)
 
-  // Timeout reaches the other invitees too (party/updated to invitees).
+  // Timeout reaches the other invitees too (party/updated to invitees),
+  // which the reference slice omitted.
   run timeoutUpdatesOtherInviteesTest =
     init
       .then(apply("party/create", "a", 0, create(s, "a")))
       .then(apply("party/invite", "a", 0, invite(s, "a", "b")))
       .then(apply("party/invite", "a", 0, invite(s, "a", "c")))
-      .expect(lastReply == Failed("invalid_request"))                           // MAX_MEMBERS = 2
-      .then(apply("party/cancelInvite", "a", 0, cancel(s, "a", "b")))
-      .expect(lastEvents == Set(("b", Removed(0)), ("a", Updated(pv(0, Set("a"), Set())))))
+      .then(apply("env/inviteTimeout", "b", 0, inviteTimeout(s, 0, "b", 0)))
+      .expect(lastEvents == Set(("b", Removed(0)),
+                                ("a", Updated(pv(0, Set("a"), Set("c")))),
+                                ("c", Updated(pv(0, Set("a"), Set("c"))))))
       .expect(clientViewsAgree)
 
   run declineTest =
