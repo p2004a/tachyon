@@ -2,7 +2,7 @@
 // friend/rejectRequest, friend/cancelRequest, friend/remove and the events
 // friend/removed, friend/requestAccepted, friend/requestCancelled,
 // friend/requestReceived, friend/requestRejected; plus the environment steps
-// the session steps env/connect, env/disconnect, env/reconnect, env/sessionExpired
+// the session steps env/connect, env/disconnect, env/reconnect, env/takeover, env/sessionExpired
 // (vocabulary of session.qnt; friend events only reach Online users).
 // Source: tachyon docs/schema/friend.md (generated from src/schema/friend/*.ts).
 // Findings: findings/friend.md (FRIEND-nn ids below).
@@ -33,6 +33,7 @@
 // @witness main=friend4 inv=not(hit("env/connect",NoReply)) steps=30 samples=200000
 // @witness main=friend4 inv=not(hit("env/reconnect",NoReply)) steps=30 samples=200000
 // @witness main=friend4 inv=not(hit("env/sessionExpired",NoReply)) steps=30 samples=200000
+// @witness main=friend4 inv=not(takeoverResynced) steps=30 samples=200000
 // @witness main=friend4 inv=not(eventLostInGrace) steps=30 samples=200000
 // @witness main=friend4 inv=not(eventDropped) steps=30 samples=200000
 // @witness main=friend4 inv=not(multipleFriends) steps=30 samples=200000
@@ -182,6 +183,9 @@ module friend {
   pure def disconnect(s: State, u: UserId): Outcome = setPresence(s, u, Online, Detached)
   pure def reconnect(s: State, u: UserId): Outcome = setPresence(s, u, Detached, Online)
   pure def sessionExpired(s: State, u: UserId): Outcome = setPresence(s, u, Detached, Offline)
+  // INT-D1 env/takeover: a second connection replaces the first; the session
+  // survives (Online -> Online) and the new socket gets user/self.
+  pure def takeover(s: State, u: UserId): Outcome = setPresence(s, u, Online, Online)
 
   // ---- reference client ----
   // A client that keeps its View from replies and events only. viewsInSync
@@ -219,7 +223,7 @@ module friend {
     if (x == u and o.reply == Ok) clientOnOk(v, cmd, t, o.state, x) else v
   pure def clientStep(v: View, x: UserId, cmd: str, u: UserId, t: UserId,
                       o: Outcome, replyFirst: bool): View =
-    if ((cmd == "env/connect" or cmd == "env/reconnect") and x == u and isOnline(o.state, x))
+    if ((cmd == "env/connect" or cmd == "env/reconnect" or cmd == "env/takeover") and x == u and isOnline(o.state, x))
       serverView(o.state, x)   // user/self
     else if (replyFirst) clientEvents(clientReply(v, x, cmd, u, t, o), x, o.events)
     else clientReply(clientEvents(v, x, o.events), x, cmd, u, t, o)
@@ -267,6 +271,7 @@ module friend {
       applyOrdered("env/connect", u, u, connect(s, u), replyFirst),
       applyOrdered("env/disconnect", u, u, disconnect(s, u), replyFirst),
       applyOrdered("env/reconnect", u, u, reconnect(s, u), replyFirst),
+      applyOrdered("env/takeover", u, u, takeover(s, u), replyFirst),
       applyOrdered("env/sessionExpired", u, u, sessionExpired(s, u), replyFirst),
     }
   }
@@ -327,7 +332,7 @@ module friend {
   val viewsInSync = USERS.forall(u => isOnline(s, u) implies views.get(u) == serverView(s, u))
   // Session steps never touch friend state.
   val sessionStepsKeepFriends = lastCmd.in(Set("env/connect", "env/disconnect", "env/reconnect",
-    "env/sessionExpired")) implies (s.friends == prevS.friends and s.requests == prevS.requests)
+    "env/takeover", "env/sessionExpired")) implies (s.friends == prevS.friends and s.requests == prevS.requests)
 
   val reasonsInSchema = replyInSchema(lastCmd, lastReply)
 
@@ -351,6 +356,11 @@ module friend {
   // ... and specifically because the peer was in its grace period (SESSION-05).
   val eventLostInGrace = and {
     eventDropped, s.presence.get(lastTarget) == Detached,
+  }
+  // INT-D1: a takeover of an Online user who has friend state; user/self resyncs it.
+  val takeoverResynced = and {
+    lastCmd == "env/takeover", isOnline(s, lastCaller), serverView(s, lastCaller) != emptyView,
+    views.get(lastCaller) == serverView(s, lastCaller),
   }
   // Somebody has several friends (more than MAX_INCOMING). A full circle
   // (friends with everybody, more than MAX_OUTGOING) is too rare for random
@@ -494,6 +504,9 @@ module friend4 {
       .expect(views.get("a") == { friends: Set("b"), outgoing: Set(), incoming: Set() })
       .then(apply("friend/list", "a", "a", list(s, "a")))
       .expect(listData(s, "a").friends == Set("b") and viewsInSync)
+      // INT-D1: a takeover keeps the session; user/self resets the view.
+      .then(apply("env/takeover", "a", "a", takeover(s, "a")))
+      .expect(s == prevS and takeoverResynced and viewsInSync)
 }
 
 // Smaller instance for bounded model checking.

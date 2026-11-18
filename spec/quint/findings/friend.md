@@ -275,9 +275,9 @@ then reverted (file byte-identical to the checked one before the final samples t
 
 - Presence is session.qnt's: `Online(u) ⇔ attached(s,u)`, `Detached(u) ⇔ online(s,u) ∧ ¬attached(s,u)`,
   `Offline(u) ⇔ ¬online(s,u)`. Steps `env/connect`, `env/disconnect`, `env/reconnect`, `env/sessionExpired`
-  have session.qnt's names and pre-conditions; `env/takeover` acts like `env/reconnect` here (view reset by
-  user/self, no state change). No session step changes friend state (`sessionStepsKeepFriends`); in
-  particular `sessionEnded(u)` does not touch friends or pending requests.
+  have session.qnt's names and pre-conditions; `env/takeover` (now a step here, INT-D1) acts like
+  `env/reconnect` (view reset by user/self, no state change). No session step changes friend state (`sessionStepsKeepFriends`); in
+  particular `sessionExpired(u)` (the session end, INT-D1) does not touch friends or pending requests.
 - Friend commands are served only while the caller is Online (`step` guard).
 - Friend events go only to Online users (`eventsOnlyToOnline`, as session.qnt `eventsToAttachedOnly`), only to
   the caller or the target, naming the other one (`eventsToInvolvedOnly`).
@@ -293,3 +293,11 @@ then reverted (file byte-identical to the checked one before the final samples t
   module relies on it for FRIEND-08).
 - If the orchestrator composes a "client view" across modules, this module's `views` is a friend-only view
   reset on user/self, like session.qnt's `views`.
+
+## Integration changes
+
+Made by the integration step (findings/system.md, decisions INT-D1..D5):
+
+- New step `env/takeover` = `takeover(s,u)` (Online -> Online, INT-D1): no state change, the client view is
+  reset by user/self (`clientStep`), included in `sessionStepsKeepFriends`. New witness `takeoverResynced`
+  and an expectation at the end of `presenceTest`.

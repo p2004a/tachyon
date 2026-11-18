@@ -211,8 +211,8 @@ module session {
       { state: s1, reply: NoReply, events: notifyChanges(s, s1), data: NoData }
     }
 
-  // Grace timer fires (party.qnt `sessionExpired`; lobby.qnt and
-  // matchmaking.qnt call the resulting session end `env/sessionEnded`).
+  // Grace timer fires (party.qnt, lobby.qnt, matchmaking.qnt, messaging.qnt
+  // and friend.qnt `sessionExpired`: one vocabulary, INT-D1).
   // Late or repeated fires (user reconnected, session
   // already gone) change nothing.
   // ASSUMPTION SESSION-07: a user who is playing keeps the session (as teiserver).

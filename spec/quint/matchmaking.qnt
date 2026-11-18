@@ -37,7 +37,7 @@
 // @witness main=matchmaking_test inv=not(hit("env/versionChanged","bumped"))
 // @witness main=matchmaking_test inv=not(hit("env/partyLeave","party_unqueued"))
 // @witness main=matchmaking_test inv=not(hit("env/partyJoin","solo_cancelled"))
-// @witness main=matchmaking_test inv=not(hit("env/sessionEnded","withdrawn"))
+// @witness main=matchmaking_test inv=not(hit("env/sessionExpired","withdrawn"))
 // @witness main=matchmaking_test inv=not(found2v2WithParty) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(requeuedAfterLost)
 // @witness main=matchmaking_test inv=not(staleRequeueCancelled) steps=40 samples=40000
@@ -381,11 +381,13 @@ module matchmaking {
           if (inMM(s, u)) "party_unqueued" else "left_party")
     }
 
-  // Session module (abstract): the session ends (grace period expired, or
-  // system/disconnect). A dropped socket alone changes nothing: "a detached
-  // member fails the ready check" by not sending ready. The session stays while
-  // the user is in a battle. u gets no events (offline).
-  pure def sessionEnded(s: State, u: UserId): Outcome =
+  // Session module (abstract): env/sessionExpired, the session ends (grace
+  // period expired; session.qnt `sessionExpired`, INT-D1). A dropped socket
+  // (env/disconnect) and a replaced connection (env/takeover) change nothing
+  // here: "a detached member fails the ready check" by not sending ready.
+  // INT-D2 (ASSUMPTION): the session stays while the user is in a battle.
+  // u gets no events (offline).
+  pure def sessionExpired(s: State, u: UserId): Outcome =
     if (s.inBattle.contains(u)) noop(s, "none")
     else {
       val w = withdraw(s, u, "", false)
@@ -465,7 +467,7 @@ module matchmaking {
       apply("env/assetsDownloaded", u, assetsDownloaded(s, u, q)),
       apply("env/partyJoin", u, partyJoin(s, u, v)),
       apply("env/partyLeave", u, partyLeave(s, u)),
-      apply("env/sessionEnded", u, sessionEnded(s, u)),
+      apply("env/sessionExpired", u, sessionExpired(s, u)),
       apply("env/lobbyEnter", u, lobbyEnter(s, u)),
       apply("env/lobbyExit", u, lobbyExit(s, u)),
       apply("env/battleEnded", u, battleEnded(s, u)),
@@ -528,7 +530,7 @@ module matchmaking {
   val lostOnlyToDisbanded = recipients(lastEvents, isLost).subseteq(disbanded)
   val disbandNotifiesAll = disbanded.forall(u =>
     recipients(lastEvents, e => isLost(e) or isCancelled(e)).contains(u) or
-    (lastCmd == "env/sessionEnded" and u == lastActor))
+    (lastCmd == "env/sessionExpired" and u == lastActor))
   // cancelled: the user was in matchmaking and is now out of it.
   val cancelledMeansOut = recipients(lastEvents, isCancelled).forall(u => inMM(prev, u) and not(inMM(s, u)))
   val cancelledReasonsInSchema = lastEvents.forall(e => match e._2 {
@@ -709,11 +711,11 @@ module matchmaking_test {
                                 ("b", Cancelled("server_error"))) and s.matches == Set())
 
   // Session end during a ready check: the others resume queueing; no event to the leaver.
-  run sessionEndedTest =
+  run sessionExpiredTest =
     init
       .then(apply("matchmaking/queue", "a", queue(s, "a", Set(Q1))))
       .then(apply("matchmaking/queue", "b", queue(s, "b", Set(Q1))))
       .then(apply("env/match", "", matchFound(s, "1v1", s.searching)))
-      .then(apply("env/sessionEnded", "b", sessionEnded(s, "b")))
+      .then(apply("env/sessionExpired", "b", sessionExpired(s, "b")))
       .expect(lastEvents == Set(("a", Lost)) and s.searching == Set({ members: Set("a"), queues: Set(Q1) }))
 }

@@ -1,8 +1,8 @@
 // Party: party/create, party/invite, party/acceptInvite, party/declineInvite,
 // party/cancelInvite, party/kickMember, party/leave and the events
 // party/invited, party/updated, party/removed; plus environment steps for the
-// invite timer, session presence (socket drop, reconnect, session grace
-// expiry, fresh connect), the party crashing, and the matchmaking module
+// invite timer, session presence (socket drop, reconnect, connection
+// takeover, session grace expiry, fresh connect), the party crashing, and the matchmaking module
 // putting a party in / taking it out of a queue.
 // Source: tachyon docs/schema/party.md (generated from src/schema/party/*.ts).
 // Grown from party_invites.qnt (the reference slice, kept unchanged).
@@ -39,6 +39,7 @@
 // @witness main=party3 inv=not(hit("env/reconnect","reattached"))
 // @witness main=party3 inv=not(hit("env/sessionExpired","expired_session"))
 // @witness main=party3 inv=not(hit("env/connect","connected"))
+// @witness main=party3 inv=not(hit("env/takeover","taken_over"))
 // @witness main=party3 inv=not(hit("env/partyQueued","queued"))
 // @witness main=party3 inv=not(hit("env/partyUnqueued","unqueued"))
 // @witness main=party3 inv=not(hit("env/partyCrashed","crashed"))
@@ -309,6 +310,9 @@ module party {
 
   // The session grace period expires (or system/disconnect ends the session):
   // the user leaves its party and all its invites disappear.
+  // INT-D2: a user in a running battle keeps the session past the grace
+  // period; this module has no battles, so the composition (system.qnt)
+  // does not take this step for such a user.
   pure def sessionExpired(s: State, u: UserId): Outcome =
     if (s.presence.get(u) != Detached) noop(s, "not_detached")
     else {
@@ -324,6 +328,13 @@ module party {
         } else acc)
       envWith(e, "expired_session")
     }
+
+  // INT-D1 env/takeover: a second connection replaces the first while the
+  // first is up. The session and its party/invites SURVIVE (session.qnt
+  // `takeover`); the new socket gets user/self, which resets the client view.
+  pure def takeover(s: State, u: UserId): Outcome =
+    if (s.presence.get(u) != Online) noop(s, "not_online")
+    else envWith({ st: s, ev: Set() }, "taken_over")
 
   // A fresh session starts (user/self: party null, no invites).
   pure def connect(s: State, u: UserId): Outcome =
@@ -342,8 +353,12 @@ module party {
       envWith({ st: s2, ev: sendOn(s, p.invited.keys(), Removed(id)).union(upd) }, "queued")
     }
 
-  // The matchmaking module says the party is no longer queued (cancel, match
-  // found, ready timeout...). The matchmaking events are that module's.
+  // The matchmaking module says the party is no longer queued. INT-D3
+  // (matchmaking.md C3; Tachyon is silent on when the lock ends): the lock
+  // lasts from queue until battle start or withdrawal (cancel, decline, ready
+  // timeout of this party, session end, server_error / version_changed);
+  // NOT on "match found", and not on `lost` when the party resumes searching.
+  // The matchmaking events are that module's.
   pure def partyUnqueued(s: State, id: PartyId): Outcome =
     if (not(id.in(s.parties.keys())) or not(s.parties.get(id).queued)) noop(s, "not_applicable")
     else envWith({ st: withParty(s, id, { ...s.parties.get(id), queued: false }), ev: Set() }, "unqueued")
@@ -391,6 +406,7 @@ module party {
     lastEvents' = o.events, lastWhy' = o.why,
     views' = USERS.mapBy(u =>
       if (u == caller and o.why == "reattached") serverView(o.state, u)        // user/self
+      else if (u == caller and o.why == "taken_over") serverView(o.state, u)   // user/self
       else if (u == caller and o.why == "connected") serverView(o.state, u)    // user/self
       else if (u == caller and o.why == "expired_session") emptyView
       else {
@@ -428,6 +444,7 @@ module party {
       apply("env/inviteTimeout", t, id, inviteTimeout(s, id, t, gen)),
       apply("env/disconnect", u, id, disconnect(s, u)),
       apply("env/reconnect", u, id, reconnect(s, u)),
+      apply("env/takeover", u, id, takeover(s, u)),
       apply("env/sessionExpired", u, id, sessionExpired(s, u)),
       apply("env/connect", u, id, connect(s, u)),
       apply("env/partyQueued", u, id, partyQueued(s, id)),
@@ -708,6 +725,15 @@ module party3 {
       .expect(lastEvents == Set(("a", Updated(pv(0, Set("a"), Set())))))
       .then(apply("env/connect", "b", 0, connect(s, "b")))
       .expect(views.get("b") == emptyView and clientViewsAgree)
+      // INT-D1: a takeover keeps membership; user/self resets the new socket's view.
+      .then(apply("party/invite", "a", 0, invite(s, "a", "b")))
+      .then(apply("party/acceptInvite", "b", 0, accept(s, "b", 0)))
+      .then(apply("env/takeover", "b", 0, takeover(s, "b")))
+      .expect(and { lastWhy == "taken_over", s == prev, partiesOf(s, "b") == Set(0),
+                    lastEvents == Set(), clientViewsAgree })
+      .then(apply("env/disconnect", "b", 0, disconnect(s, "b")))
+      .then(apply("env/takeover", "b", 0, takeover(s, "b")))               // not attached: no-op
+      .expect(lastWhy == "not_online")
 
   // Session expiry of an invitee drops the invite; expiry of the last
   // member disbands and tells the invitees.

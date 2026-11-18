@@ -109,9 +109,9 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 
 ### SESSION-08: When a session ends the user leaves lobby, battle, queue and party
 - Kind: Assumption (cross-module)
-- Evidence: party.qnt `sessionExpired`, lobby.qnt `env/sessionEnded`, matchmaking.qnt `env/sessionEnded`
-  all remove the user. findings/lobby.md:375 says the session also ends when "replaced"; in this module a
-  takeover keeps the session (SESSION-01) — disagreement to settle.
+- Evidence: party.qnt, lobby.qnt and matchmaking.qnt `env/sessionExpired` (lobby and matchmaking were
+  `env/sessionEnded` before integration) all remove the user. findings/lobby.md said the session also ends
+  when "replaced"; settled by INT-D1: a takeover keeps the session (SESSION-01), lobby.md corrected.
 - Spec choice: `endSession` resets `activity` to Menu (`offlineIsIdle`).
 
 ### SESSION-09: system/disconnect gets no response; whether it ends the session is unstated
@@ -314,10 +314,11 @@ Presence, as the other modules see it: `Online(u) ⇔ attached(s,u)`, `Detached(
   counterpart — party state must be unchanged by it, and the new socket gets user/self (party view reset);
   (2) here `system/disconnect` ends the session straight from Online, party models it as
   `disconnect`+`sessionExpired` (same end state); (3) here `sessionExpired` is a no-op while playing
-  (SESSION-07), party has no such guard.
-- `sessionEnded(u)` (lobby.qnt / matchmaking.qnt `env/sessionEnded`) happens exactly on
-  `env/sessionExpired` with effect and on `system/disconnect` Ok. Not on `env/takeover` (disagrees with
-  findings/lobby.md:375 "or replaced").
+  (SESSION-07), party has no such guard (the composition guards it, INT-D2); party now has
+  `env/takeover` too.
+- The session end in lobby.qnt / matchmaking.qnt is now also named `env/sessionExpired` (INT-D1). It
+  happens exactly on `env/sessionExpired` with effect and on `system/disconnect` Ok. Not on
+  `env/takeover` (lobby.md corrected).
 - Assumed of other groups: `¬online(u) ⇒ u ∉ lobby members ∧ u ∉ queue ∧ u ∉ party members ∧ u not
   playing` (`offlineIsIdle`); `activity(u) = InLobby ⇔ u is a lobby member`, `Playing ⇔ u is in a running
   battle`, provided by lobby/battle modules through `env/activityChanged`; each such change produces
@@ -333,3 +334,15 @@ Presence, as the other modules see it: `Online(u) ⇔ attached(s,u)`, `Detached(
   `env/sessionEnded`, and lobby treats a replaced connection as a session end; this module's mapping is
   above.
 - Decide whether "playing keeps the session" (SESSION-07) applies to party/lobby/matchmaking too.
+
+## Integration changes
+
+Made by the integration step (findings/system.md, decisions INT-D1..D5):
+
+- This module's vocabulary (`env/connect`, `env/disconnect`, `env/reconnect`, `env/takeover`,
+  `env/sessionExpired`; presence Online | Detached | Offline) is the shared one (INT-D1). Only a comment in
+  `sessionExpired` changed (it named the old lobby/matchmaking step `env/sessionEnded`).
+- SESSION-07 ("playing keeps the session") is adopted for every module as INT-D2, still an Assumption.
+  Lobby and matchmaking guard their `sessionExpired` with it; party, messaging and friend have no battle
+  notion and system.qnt guards the composed step.
+- Both requests above are settled by INT-D1/INT-D2.

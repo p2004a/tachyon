@@ -1,5 +1,5 @@
 // Lobby: every lobby/* command and event, plus the environment steps that
-// drive them (vote timer, autohost answer, battle end, session end, lobby
+// drive them (vote timer, autohost answer, battle end, session expiry, lobby
 // crash, ban expiry, other activities). Source: tachyon docs/schema/lobby.md
 // (generated from src/schema/lobby/README.md) and the schema descriptions in
 // src/schema/lobby/*.ts. Findings: findings/lobby.md (LOBBY-nn).
@@ -638,13 +638,19 @@ module lobby {
     if (not(id.in(s.lobbies.keys())) or not(isRunning(s.lobbies.get(id).battle))) envNoop(s)
     else finish(s, withLobby(s, id, { ...s.lobbies.get(id), battle: NoBattle, inBattle: Set() }), NoReply, Set(), Set())
 
-  // The session ends (grace period over). The user is gone: no lobby/left
-  // (ASSUMPTION LOBBY-A15); the list subscription dies with the session.
-  pure def sessionEnded(s: State, u: UserId): Outcome = {
-    val s1 = { ...s, subscribers: s.subscribers.exclude(Set(u)) }
-    val s2 = if (inLobby(s, u)) withLobby(s1, lobbyOf(s, u), removeMember(myLobby(s, u), u)) else s1
-    finish(s, s2, NoReply, Set(u), Set())
-  }
+  // The session ends (grace period over; session.qnt `sessionExpired`, INT-D1).
+  // The user is gone: no lobby/left (ASSUMPTION LOBBY-A15); the list
+  // subscription dies with the session. A replaced connection (env/takeover)
+  // does NOT end the session and is not a lobby step (INT-D1).
+  // INT-D2 (ASSUMPTION, teiserver session.ex:1569): a user in the lobby's
+  // running battle keeps the session past the grace period -> no-op.
+  pure def sessionExpired(s: State, u: UserId): Outcome =
+    if (inLobby(s, u) and u.in(myLobby(s, u).inBattle)) envNoop(s)
+    else {
+      val s1 = { ...s, subscribers: s.subscribers.exclude(Set(u)) }
+      val s2 = if (inLobby(s, u)) withLobby(s1, lobbyOf(s, u), removeMember(myLobby(s, u), u)) else s1
+      finish(s, s2, NoReply, Set(u), Set())
+    }
 
   // "can also be forcibly removed from a lobby ... if the lobby crashed".
   pure def lobbyCrashed(s: State, id: LobbyId): Outcome =
@@ -724,7 +730,7 @@ module lobby {
       on("env/autohostStarted", autohostStarted(s, id)),
       on("env/autohostFailed", autohostFailed(s, id)),
       on("env/battleEnded", battleEnded(s, id)),
-      on("env/sessionEnded", sessionEnded(s, u)),
+      on("env/sessionExpired", sessionExpired(s, u)),
       on("env/lobbyCrashed", lobbyCrashed(s, id)),
       on("env/banExpired", banExpired(s, id, t)),
       on("env/otherActivity", otherActivity(s, u, flag)),
@@ -797,7 +803,7 @@ module lobby {
     ovOf(prev, id) != ovOf(s, id) implies s.subscribers.forall(u => (u, ListUpdated(id)).in(lastEvents)))
   def gotLeft(u: UserId): bool = lastEvents.exists(e => e._1 == u and match e._2 { | Left(_) => true | _ => false })
   // A member removed by anything but their own leave or the end of their session gets lobby/left.
-  val leftComplete = (lastCmd != "lobby/leave" and lastCmd != "env/sessionEnded") implies
+  val leftComplete = (lastCmd != "lobby/leave" and lastCmd != "env/sessionExpired") implies
     prev.lobbies.keys().forall(id => members(prev.lobbies.get(id)).forall(u => inLobby(s, u) or gotLeft(u)))
 
   val safety = and {
@@ -838,7 +844,7 @@ module lobby_test {
     "lobby/updateBot", "lobby/update", "lobby/appointBoss", "lobby/unboss", "lobby/kickban",
     "lobby/voteSubmit", "lobby/voteCancel", "lobby/startBattle", "lobby/joinBattle",
     "lobby/subscribeList", "lobby/unsubscribeList", "env/voteTimeout", "env/autohostStarted",
-    "env/autohostFailed", "env/battleEnded", "env/sessionEnded", "env/lobbyCrashed",
+    "env/autohostFailed", "env/battleEnded", "env/sessionExpired", "env/lobbyCrashed",
     "env/banExpired", "env/otherActivity")
 
   pure val c11 = Map(0 -> 1, 1 -> 1)
@@ -1037,6 +1043,8 @@ module lobby_test {
       .expect(lastReply == Failed("battle_full"))
       .then(apply("lobby/joinBattle", joinBattle(s, "c", false)))
       .expect(and { lastReply == Ok, lastEvents == Set(("c", BattleStart(0))) })
+      .then(apply("env/sessionExpired", sessionExpired(s, "c")))               // INT-D2: playing keeps the seat
+      .expect(and { inLobby(s, "c"), s == prev, lastEvents == Set() })
       .then(apply("env/battleEnded", battleEnded(s, 0)))
       .expect(lastEvents == Set(("a", Updated(0)), ("b", Updated(0)), ("c", Updated(0)), ("d", ListUpdated(0))))
 
@@ -1053,7 +1061,7 @@ module lobby_test {
       .then(apply("lobby/join", join(s, "c", 0)))
       .then(apply("env/otherActivity", otherActivity(s, "c", true)))           // refused: c is in a lobby
       .expect(s.elsewhere == Set("b"))
-      .then(apply("env/sessionEnded", sessionEnded(s, "a")))                   // no lobby/left for a
+      .then(apply("env/sessionExpired", sessionExpired(s, "a")))               // no lobby/left for a
       .expect(lastEvents == Set(("c", Updated(0)), ("d", ListUpdated(0))))
       .then(apply("lobby/unsubscribeList", unsubscribeList(s, "d")))
       .then(apply("lobby/leave", leave(s, "c")))

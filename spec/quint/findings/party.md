@@ -355,12 +355,16 @@ Predicates this module assumes about, or guarantees to, other groups' state (nam
 - I1 (session/user/system → party): `presence(u) ∈ {Online, Detached, Offline}`. Only `Online` users send requests and
   receive events. `Detached` users keep membership and invites (`sessionsOwnParties`: every member and invitee
   has `presence != Offline`). On reconnect, `user/self.party == serverView(s,u).party` and
-  `user/self.invitedToParties == serverView(s,u).invites`. A new connection that replaces an old one behaves as
-  disconnect followed by reconnect. `system/disconnect` behaves as `sessionExpired` immediately.
+  `user/self.invitedToParties == serverView(s,u).invites`. A new connection that replaces an old one is
+  `env/takeover` (INT-D1): presence stays Online, membership and invites survive, user/self resets the view.
+  `system/disconnect` behaves as `sessionExpired` immediately. INT-D2: `sessionExpired` is not taken for a
+  user in a running battle (guarded by the composition, system.qnt).
 - I2 (matchmaking → party): `queued(p)` is set by the matchmaking module (`env/partyQueued`) only for an existing
   party with `not queued(p)`. That module should only do so when every member is `Online` and passed checkAssets
-  (`matchmaking/queue` precondition, not checked here). It is cleared by `env/partyUnqueued` on cancel / match found / ready
-  timeout.
+  (`matchmaking/queue` precondition, not checked here). INT-D3 (= matchmaking.md C3): `queued(p) ⇔ partyLocked(p)`;
+  it is cleared by `env/partyUnqueued` on withdrawal (cancel, decline, this party's ready timeout, session end,
+  server_error, version_changed) and on battle start — NOT on "match found", and not on `lost` when the party
+  resumes searching.
 - I3 (party → matchmaking): for every party `p`,
   `queued(p) ⇒ invited(p) = ∅` and `queued(p) ⇒ members(p) unchanged since queueing` (`queuedMembershipStable`).
   Any membership change of a queued party unqueues it and sends `matchmaking/cancelled{party_user_left}` to every
@@ -389,3 +393,14 @@ the shared Apalache server while other agents were verifying). `--max-steps=3` d
 still checking states at depth 3, and all invariants held so far. The costly conjuncts are `clientViewsAgree` (maps of
 records) and `sessionExpired`'s fold. Depth ≥ 3 is covered only by simulation (20000 × 30 on `party3`).
 
+## Integration changes
+
+Made by the integration step (findings/system.md, decisions INT-D1..D5):
+
+- New step `env/takeover` = `takeover(s,u)` (INT-D1): Online -> Online, no state change, the caller's view is
+  reset from `serverView` (user/self). Witness `hit("env/takeover","taken_over")`, expectations at the end of
+  `presenceTest`. I1 no longer says a replacement "behaves as disconnect followed by reconnect".
+- I2 rewritten to matchmaking.md C3 (INT-D3): the lock is not released on "match found". The `partyUnqueued`
+  comment says so; the step itself was already generic. Tachyon is silent on the lock's duration (party.md has no
+  matchmaking reason; matchmaking.md only "forcing the entire party to withdraw").
+- `sessionExpired` comment: INT-D2 guard lives in the composition (this module has no battles).

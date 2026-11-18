@@ -320,3 +320,13 @@ What this module assumes about other groups' state, as predicates:
 about 57 s (`--max-steps=2`: 51 s). The directive is `steps=3`. Three steps from
 the connected state reach a running battle (request, autohost handling, Ok
 response), but not the reconnect scenarios. Those are covered by simulation and the transcripts.
+
+## Integration changes
+
+Made by the integration step (findings/system.md, decisions INT-D1..D5):
+
+- No model change. This module's `env/connect` / `env/disconnect` / `env/graceExpired` are the AUTOHOST's
+  connection and grace, not the user session steps of INT-D1; system.qnt keeps them apart.
+- system.qnt composes `autohost/start` Ok / PFailed / PEnded|PLost with lobby (`autohostStarted`,
+  `autohostFailed`, `battleEnded`) and matchmaking (`battleStarted`, `startFailed`/`startGaveUp`, `battleEnded`)
+  as listed in the Cross-module interface above. INT-D2: a battle participant keeps the user session.

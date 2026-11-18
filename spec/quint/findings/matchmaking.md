@@ -281,7 +281,7 @@ core branches (queue, ready, match) several times, which weights only the random
 - Evidence: `session.ex:588-604` leaves the queues only in `{:searching, ...}`. In `{:pairing, ...}` it does nothing,
   so the room waits for the full timeout and then everyone gets `lost`. A session that times out
   (`queue_server.ex:481-485` `DOWN {:player}`) does cancel the room at once.
-- Spec choice: `sessionEnded` withdraws at once: the others get `lost` and resume.
+- Spec choice: `sessionExpired` (was `sessionEnded`) withdraws at once: the others get `lost` and resume.
 - To verify: —
 
 ### MM-26: Smaller teiserver defects found while reading the matchmaking path
@@ -379,7 +379,7 @@ core branches (queue, ready, match) several times, which weights only the random
 | env/versionChanged | bump + cancel searching | witnessed `bumped`; stale resume `staleRequeueCancelled` |
 | env/partyJoin | solo ticket cancelled | witnessed `solo_cancelled`, partyLeaveTest |
 | env/partyLeave | party ticket cancelled | witnessed `party_unqueued`, partyLeaveTest |
-| env/sessionEnded | withdraw, others lost | witnessed `withdrawn`, sessionEndedTest |
+| env/sessionExpired | withdraw, others lost | witnessed `withdrawn`, sessionExpiredTest |
 
 ## Seeded mutations
 
@@ -390,7 +390,7 @@ Each was run on a copy (`quint test` plus `safety` at 20000 × 30, then the sing
 | M1 | `queue` keeps the replaced ticket (`s.searching.union(...)`) | replaceAndDenialsTest; `atMostOneTicket`, `matchedOutOfQueue`, `foundExact`, `lostOnlyToDisbanded`, `cancelledMeansOut` |
 | M2 | `matchFound` leaves the matched tickets searching | duelTest, partyDeclineTest, readyTimeoutTest; `matchedOutOfQueue`, `atMostOneTicket`, `ticketsArePartyUnits`, `activityExclusive`, ... |
 | M3 | `ready` sends foundUpdate to the caller only | duelTest; `foundUpdateExact` |
-| M4 | `disband` sends no `lost` to the resumed tickets | partyDeclineTest, readyTimeoutTest, sessionEndedTest; `disbandNotifiesAll` |
+| M4 | `disband` sends no `lost` to the resumed tickets | partyDeclineTest, readyTimeoutTest, sessionExpiredTest; `disbandNotifiesAll` |
 | M5 | `partyLeave` does not withdraw the party ticket (`val w = (s, Set())`) | partyLeaveTest; `ticketsArePartyUnits` |
 | M6 | `cancel` denial reason `no_match` instead of `not_queued` | replaceAndDenialsTest; `reasonsInSchema` |
 | M7 | `partyJoin` without the "party is searching" lock | **not caught**. The mutant is equivalent at `MAX_PARTY = 2`: a searching party already has 2 members, so the size guard refuses the join. Covering it needs an instance with `MAX_PARTY = 3`. |
@@ -420,8 +420,8 @@ Predicates this module assumes or provides (`inMM(u)` = u is in a searching tick
   party (`partyJoin` guard). teiserver allows it and treats it as a decline (`session.ex:884-890` →
   `leave_matchmaking`).
 - C5 session (party.md I1): `Detached` changes nothing here; the user fails the ready check by not sending `ready`.
-  `Offline` (grace expiry or `system/disconnect`) = `sessionEnded`: withdraw with no event to u, and leave the party.
-  The session stays while the user is in a battle.
+  `Offline` (grace expiry or `system/disconnect`) = `env/sessionExpired` (was `env/sessionEnded`): withdraw with no event to u,
+  and leave the party. The session stays while the user is in a battle (INT-D2). `env/takeover` changes nothing here (INT-D1).
 - C6 assets: `missing(u, q)` is what u's client would answer to `checkAssets(q)` (`missing`/`downloading`/failure/timeout
   → missing).
 
@@ -430,6 +430,14 @@ Predicates this module assumes or provides (`inMM(u)` = u is in a searching tick
 - R1: `Outcome` here has `requests: Set[(UserId, ServerRequest)]` (server->user requests: checkAssets, battle/start) and
   `why`. A shared `requests` field in `common.qnt` would let the battle module own `battle/start` and let the lobby
   module reuse it.
-- R2: settle C3 against party.md I2 (when the party lock ends). The two modules currently disagree on "match found".
+- R2: settle C3 against party.md I2 (when the party lock ends). Settled by INT-D3: C3 is binding (party.md I2 rewritten).
 - R3: Apalache: `--max-steps=2` passes in about 190 s with `JVM_ARGS=-Xmx6G`. 3 steps was not attempted (shared
   server, other agents running). `teamsFormable` was rewritten without `setOfMaps`, which Apalache refuses to expand.
+
+## Integration changes
+
+Made by the integration step (findings/system.md, decisions INT-D1..D5):
+
+- `env/sessionEnded` / `sessionEnded` renamed `env/sessionExpired` / `sessionExpired` (INT-D1): the step, its witness, `disbandNotifiesAll` and the transcript (`sessionExpiredTest`). Behaviour unchanged; the battle guard is INT-D2.
+- C3 (party lock from queue until battle start or withdrawal) adopted for all modules as INT-D3. Tachyon is silent on when the lock ends (party.md has no matchmaking reason, matchmaking.md only says "forcing the entire party to withdraw"), so C3 stands.
+- C1 confirmed as INT-D4 (`already_in_battle` for any battle, `invalid_request` for a lobby).

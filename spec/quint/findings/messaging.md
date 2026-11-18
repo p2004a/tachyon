@@ -379,7 +379,7 @@ Predicates over this module's state `s` for a user `u`:
     (SESSION-05), messaging needs an explicit resubscribe after every `user/self`.
 - Lobby (lobby.qnt). `lobbyOf(s,u) = l ≠ 0` ⇔ lobby.qnt `inLobby(u) ∧ lobbyOf(u) = l`, where the
   members are players plus spectators (bots excluded). `env/membership` is this module's view of
-  every lobby join, leave or kick. Assumed: `inLobby(u) ⇒ online(u)` (lobby.qnt `env/sessionEnded`
+  every lobby join, leave or kick. Assumed: `inLobby(u) ⇒ online(u)` (lobby.qnt `env/sessionExpired`
   removes the user), and at most one lobby per user.
 - Party (party.qnt I5). `partyOf(s,u) = p ≠ 0` ⇔ `u ∈ members(p)`, with invitees excluded. Assumed:
   `u ∈ members(p) ⇒ presence(u) ≠ Offline`, and at most one party per user. Detached members keep
@@ -392,6 +392,17 @@ Predicates over this module's state `s` for a user `u`:
 - session.qnt / party.qnt: note in their interface that `env/reconnect` and `env/takeover` drop the
   messaging subscription (MSG-07/MSG-08). A composed client must re-send `messaging/subscribeReceived`
   after `user/self`.
-- lobby.qnt: findings/lobby.md says `env/sessionEnded` happens on "grace period expired, or replaced".
-  This module, like session.qnt, keeps the session (and the message buffer) on replacement.
+- lobby.qnt: findings/lobby.md said `env/sessionEnded` happens on "grace period expired, or replaced".
+  This module, like session.qnt, keeps the session (and the message buffer) on replacement. Settled by
+  INT-D1 (lobby.md corrected, step renamed `env/sessionExpired`).
 - No changes requested to `common.qnt` or `schema.qnt`.
+
+## Integration changes
+
+Made by the integration step (findings/system.md, decisions INT-D1..D5):
+
+- No model change: this module already uses the INT-D1 vocabulary (`env/takeover` keeps the session).
+- The subscription rule (dropped on disconnect, reconnect and takeover, ASSUMPTION MSG-A9) is kept by
+  system.qnt (`msgSubSocketBound`). Tachyon does not say it (MSG-08), so system.md lists it as an
+  assumption the composition depends on (INT-D1 note), not as protocol.
+- Interface text updated for the lobby step rename.

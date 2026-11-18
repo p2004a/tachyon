@@ -7,7 +7,7 @@
 - `env/voteTimeout`: the vote timer fires.
 - `env/autohostStarted` and `env/autohostFailed`: the autohost answers a start request.
 - `env/battleEnded`
-- `env/sessionEnded`: the session grace period runs out.
+- `env/sessionExpired` (was `env/sessionEnded`): the session grace period runs out (no-op while the user plays in the lobby's battle, INT-D2).
 - `env/lobbyCrashed`
 - `env/banExpired`
 - `env/otherActivity`: another module puts the user into, or takes them out of, matchmaking or a non-lobby battle.
@@ -161,7 +161,7 @@ The server->user `battle/start` request is the event `BattleStart`.
   - teiserver tachyon_handler.ex:1059-1072 sends a listReset after *every* subscribeList, including repeats (session.ex:1192 `list = TachyonLobby.list()`).
   - bar-lobby lobby.store.ts:119 "this subscribes us, but does not return an updated list, that happens in the ListUpdated or ListReset events".
   - bar-lobby lobby.store.ts:71 "The server drops the list subscription when the socket dies" is inaccurate. The subscription lives in the session (session.ex:93) and survives the reconnect grace period. bar-lobby resubscribes and receives a fresh listReset only because teiserver resends it.
-- Spec choice: every subscribeList answers Ok and sends a listReset to the caller (ASSUMPTION LOBBY-A02). A subscription ends with unsubscribeList or `env/sessionEnded`.
+- Spec choice: every subscribeList answers Ok and sends a listReset to the caller (ASSUMPTION LOBBY-A02). A subscription ends with unsubscribeList or `env/sessionExpired`.
 - To verify: state "subscribeList is always followed by lobby/listReset", and say whether reconnecting keeps the subscription.
 
 ### LOBBY-17: listUpdated is batched and its playerCount is inconsistent
@@ -231,7 +231,7 @@ The server->user `battle/start` request is the event `BattleStart`.
   - On reconnect, user/self carries only `currentLobby` (tachyon_handler.ex:1121), and bar-lobby re-issues lobby/join to fetch the state (lobby.store.ts:85 `requestJoinLobby({ id: lobbyId, pushLobbyView: false })`).
   - The design says "After reconnect the server sends full state following user/self". teiserver sends no lobby details.
   - When the session ends, the user is removed with no lobby/left (they are gone).
-- Spec choice: `env/sessionEnded` removes the user with no lobby/left and drops their list subscription (ASSUMPTION LOBBY-A15). Reconnect itself is not modelled: lobby state belongs to the session.
+- Spec choice: `env/sessionExpired` removes the user with no lobby/left and drops their list subscription (ASSUMPTION LOBBY-A15), except while the user is in the lobby's running battle (INT-D2). Socket drop, reconnect and takeover are not lobby steps: lobby state belongs to the session, which survives them (INT-D1).
 - To verify: document the disconnect lifetime, and whether full lobby state follows user/self.
 
 ### LOBBY-26: A passed appointBoss vote makes a departed user a boss
@@ -279,7 +279,7 @@ The server->user `battle/start` request is the event `BattleStart`.
 - **LOBBY-A12** (`ovOf`): see LOBBY-17.
 - **LOBBY-A13** (`unboss`): see LOBBY-29.
 - **LOBBY-A14** (`startBattle`): see LOBBY-21.
-- **LOBBY-A15** (`sessionEnded`): see LOBBY-25.
+- **LOBBY-A15** (`sessionExpired`): see LOBBY-25.
 - Also: queue promotion chooses the ally team with the most free room, lowest index first. The protocol leaves this free ("a suitable ally team"), and this is teiserver's `find_team`.
 
 ### Per-command implementation check (summary)
@@ -372,7 +372,7 @@ These predicates are over this module's state `s`, for a user `u`:
   - `env/battleEnded(id)` corresponds to the battle ending (battle/ended is that module's event). Afterwards `currentBattle = null`.
   - joinBattle's `battle_full` is the battle's answer to adding a player.
 - **Session / system:**
-  - `env/sessionEnded(u)` happens when the session ends (grace period expired, or replaced). Afterwards `¬inLobby(u) ∧ u ∉ subscribers`, and no lobby/left is sent.
+  - `env/sessionExpired(u)` happens when the session ends (grace period expired, or system/disconnect). A replaced connection (`env/takeover`) does NOT end the session (INT-D1; the earlier text "or replaced" was wrong). Afterwards `¬inLobby(u) ∧ u ∉ subscribers`, and no lobby/left is sent. While `u ∈ inBattle` of its lobby the step is a no-op (INT-D2).
   - Users are identified by session, one live session per user.
 - **Party:** no interaction is modelled. Tachyon says nothing about parties and lobbies.
 
@@ -381,3 +381,12 @@ These predicates are over this module's state `s`, for a user `u`:
 1. **Apalache.** `quint verify` cannot handle this module at 2-3 steps within the 4 GB default heap (about 8-9 min, then OOM), and with 10 GB it had not finished in 6.5 min. There is no `@verify` directive. If bounded checking is required for lobby, a hand-reduced Apalache-friendly variant would be needed: without the generic `finish` event derivation and without the `USERS.fold` queue refill. Decide whether it is worth it.
 2. **Composition.** The matchmaking module should guard `matchmaking/queue` with `not(inLobby(u))`, using the predicate above. The battle module should agree that lobby battles do not occupy the activity slot (LOBBY-03).
 3. **check.sh runtime.** `./check.sh lobby.qnt` takes about 8.7 minutes: 1 typecheck, 1 test, 4 invariant runs and 78 witness runs, 84 ok lines. Every witness was timed. All are reached within about 3,100 traces, out of the 10,000 samples allowed.
+
+## Integration changes
+
+Made by the integration step (findings/system.md, decisions INT-D1..D5):
+
+- `env/sessionEnded` / `sessionEnded` renamed `env/sessionExpired` / `sessionExpired` (INT-D1), in the step, `leftComplete`, `ALL_STEPS` and `sessionAndListTest`.
+- `sessionExpired` is a no-op while the user is in its lobby's running battle (`u ∈ inBattle`), INT-D2 (teiserver session.ex:1569-1571 starts no timeout while `state.battle` is set). New expectation in `battleTest`.
+- Cross-module interface text: a replaced connection does not end the session (INT-D1). Disconnect, reconnect and takeover are not lobby steps.
+- Unchanged and confirmed by INT-D4: `lobby/create` and `lobby/join` answer `invalid_request` while the user is in `elsewhere` (queued, in a found match, or in a matchmaking battle); lobby battles do not take a second slot.

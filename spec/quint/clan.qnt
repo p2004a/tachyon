@@ -8,6 +8,7 @@
 //
 // @test main=clan_test
 // @inv main=clan_test inv=safety steps=30 samples=20000
+// @inv main=clan_grow inv=safety steps=30 samples=20000
 // @witness main=clan_test inv=not(wCreateOk)
 // @witness main=clan_test inv=not(wCreateInvalid)
 // @witness main=clan_test inv=not(wUpdateOk)
@@ -17,7 +18,7 @@
 // @witness main=clan_test inv=not(wDeleteInvalid)
 // @witness main=clan_test inv=not(wDeleteUnauthorized)
 // @witness main=clan_test inv=not(wInviteOk)
-// @witness main=clan_test inv=not(wInviteByCoLeader)
+// @witness main=clan_grow inv=not(wInviteByCoLeader) steps=30 samples=400000
 // @witness main=clan_test inv=not(wInviteInvalid)
 // @witness main=clan_test inv=not(wInviteUnauthorized)
 // @witness main=clan_test inv=not(wCancelOk)
@@ -33,12 +34,12 @@
 // @witness main=clan_test inv=not(wKickUnauthorized)
 // @witness main=clan_test inv=not(wLeaveOk)
 // @witness main=clan_test inv=not(wLeaveInvalid)
-// @witness main=clan_test inv=not(wLeaveHeirCoLeader)
+// @witness main=clan_grow inv=not(wLeaveHeirCoLeader) steps=30 samples=400000
 // @witness main=clan_test inv=not(wLeaveHeirMember)
 // @witness main=clan_test inv=not(wLeaveDissolves)
-// @witness main=clan_test inv=not(wSetRolePromote)
-// @witness main=clan_test inv=not(wSetRoleDemote)
-// @witness main=clan_test inv=not(wSetRoleTransfer)
+// @witness main=clan_grow inv=not(wSetRolePromote) steps=30 samples=400000
+// @witness main=clan_grow inv=not(wSetRoleDemote) steps=30 samples=400000
+// @witness main=clan_grow inv=not(wSetRoleTransfer) steps=30 samples=400000
 // @witness main=clan_test inv=not(wSetRoleInvalid)
 // @witness main=clan_test inv=not(wSetRoleUnauthorized)
 // @witness main=clan_test inv=not(wViewOk)
@@ -46,6 +47,7 @@
 // @witness main=clan_test inv=not(wViewListOk)
 // @witness main=clan_test inv=not(wTwoClans)
 // @verify main=clan_test inv=safety steps=3
+// (verify: passed in ~260 s with JVM_ARGS=-Xmx6G, before successionFollowsRule was added)
 module clan {
   import common.* from "./common"
 
@@ -62,7 +64,7 @@ module clan {
   type State = { clans: ClanId -> Clan, nextId: ClanId, clock: int }
 
   // On the wire clan/invited carries only clanUpdateableBaseData (no clanId,
-  // CLAN-04) and clan/updated carries clanUpdateableData (no clanId, CLAN-05).
+  // CLAN-03) and clan/updated carries clanUpdateableData (no clanId, CLAN-03).
   // The model keeps the clan id on every event so recipients can be checked.
   type Event =
     | Updated(ClanId)
@@ -389,6 +391,19 @@ module clan {
     })),
   }
 
+  // "If the clan-leader leaves the clan by clan/leave the oldest co-leader is set as
+  //  new clan leader. If no co-leader exist the oldest member is set as new clan leader."
+  val successionFollowsRule = lastCmd != "clan/leave" or lastReply != Ok
+    or roleOf(prev, lastCaller) != "leader" or {
+      val c = clanOf(prev, lastCaller)
+      val ms = prev.clans.get(c).members
+      val rest = ms.keys().exclude(Set(lastCaller))
+      val cos = rest.filter(x => ms.get(x).role == "coLeader")
+      val pool = if (cos != Set()) cos else rest
+      rest == Set() or pool.forall(x => roleOf(s, x) == "leader"
+        or pool.exists(y => roleOf(s, y) == "leader" and ms.get(y).joinedAt < ms.get(x).joinedAt))
+    }
+
   // clan/view and clan/viewList report the current state.
   val viewsAccurate = match lastData {
     | NoData => true
@@ -400,6 +415,7 @@ module clan {
   val safety = and {
     atMostOneClan, oneLeader, wellFormed, reasonsInSchema, denialsInert,
     permissionsRespected, eventsAudience, eventsComplete, viewsAccurate,
+    successionFollowsRule,
   }
 
   // ---- reachability witnesses (each `not(w...)` must be violated) ----
