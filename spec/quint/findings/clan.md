@@ -29,6 +29,9 @@ Invariants in `safety`:
 - `successionFollowsRule`.
 - `viewsAccurate`.
 
+`./check.sh clan.qnt`: 41/41 ok (typecheck, 1 test run of 4 transcripts, 2 safety simulations at 20000 samples, 37 witnesses); 42/42 with `VERIFY=1`.
+`VERIFY=1` adds Apalache `safety` at `--max-steps=3`, which passes in about 4-5 min with `JVM_ARGS=-Xmx6G`.
+
 **Implementation status (CLAN-01): nothing of this group is implemented in teiserver or bar-lobby.**
 Every clan request gets `command_unimplemented` from teiserver. bar-lobby sends no clan command and
 handles no clan event. So the per-command "Divergence" entries below are all the same divergence

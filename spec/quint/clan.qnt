@@ -47,7 +47,7 @@
 // @witness main=clan_test inv=not(wViewListOk)
 // @witness main=clan_test inv=not(wTwoClans)
 // @verify main=clan_test inv=safety steps=3
-// (verify: passed in ~260 s with JVM_ARGS=-Xmx6G, before successionFollowsRule was added)
+// (verify steps=3 passes in ~4-5 min with JVM_ARGS=-Xmx6G; steps=4 not attempted)
 module clan {
   import common.* from "./common"
 
