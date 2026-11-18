@@ -78,7 +78,7 @@
 // @witness main=autohost_up inv=not(statusDraining) steps=30 samples=20000
 // @witness main=autohost_two inv=not(twoHostsBusy) steps=30 samples=10000
 //
-// @verify main=autohost_small inv=safety steps=2
+// @verify main=autohost_small inv=safety steps=3
 module autohost {
   import common.* from "./common"
   import schema.* from "./schema"
@@ -856,6 +856,27 @@ module autohost_test {
       .then(apply("env/ahHandle", ahHandle(s, "h1", req(KILL, 1, NOU, "", 0), "ok")))
       .then(apply(KILL, onResponse(s, "h1", resp(KILL, 1, NOU, Ok))))
       .expect(not(s.battles.get(1).mayRun))
+
+  // AH-12: the first engine's buffered engine_quit arrives after a retried
+  // start succeeded; the server ends the battle but keeps the kill obligation.
+  run instanceAmbiguityTest =
+    init
+      .then(up(0))
+      .then(apply("env/requestBattle", requestBattle(s, 1, "h1", Set("a"), Set(), "e1")))
+      .then(apply("env/ahHandle", ahHandle(s, "h1", startReq(1, "e1"), "ok")))
+      .then(apply("env/disconnect", disconnect(s, "h1")))
+      .then(apply("env/engine", engineEvent(s, "h1", 1, "engine_quit", NOU, -1)))
+      .then(up(0))
+      .then(apply("env/retryStart", retryStart(s, 1)))
+      .then(apply("env/ahHandle", ahHandle(s, "h1", startReq(1, "e1"), "ok")))   // engine 2
+      .then(apply(START, onResponse(s, "h1", resp(START, 1, NOU, Ok))))
+      .expect(s.battles.get(1).phase == PRunning and s.ah.get("h1").running == Set(1))
+      .then(doDeliver("h1"))                                                    // engine 1's quit
+      .expect(s.battles.get(1).phase == PEnded and s.battles.get(1).mayRun and noForgottenBattles)
+      .then(apply("env/sendKill", sendKill(s, 1)))
+      .then(apply("env/ahHandle", ahHandle(s, "h1", req(KILL, 1, NOU, "", 0), "ok")))
+      .then(apply(KILL, onResponse(s, "h1", resp(KILL, 1, NOU, Ok))))
+      .expect(not(s.battles.get(1).mayRun) and s.ah.get("h1").running == Set())
 
   // Start times out, then succeeds late: no battle/start, the server kills it.
   run lateSuccessTest =

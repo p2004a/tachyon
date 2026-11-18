@@ -2,37 +2,41 @@
 // friend/rejectRequest, friend/cancelRequest, friend/remove and the events
 // friend/removed, friend/requestAccepted, friend/requestCancelled,
 // friend/requestReceived, friend/requestRejected; plus the environment steps
-// env/connect and env/disconnect (events only reach connected clients).
+// the session steps env/connect, env/disconnect, env/reconnect, env/sessionExpired
+// (vocabulary of session.qnt; friend events only reach Online users).
 // Source: tachyon docs/schema/friend.md (generated from src/schema/friend/*.ts).
 // Findings: findings/friend.md (FRIEND-nn ids below).
 //
 // @test main=friend4
-// @inv main=friend4 inv=safety steps=30 samples=20000
-// @witness main=friend4 inv=not(hit("friend/list",Ok))
-// @witness main=friend4 inv=not(newRequestSent)
-// @witness main=friend4 inv=not(autoAccepted)
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_user")))
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("already_in_friendlist")))
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_request")))
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("outgoing_capacity_reached")))
-// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("incoming_capacity_reached")))
-// @witness main=friend4 inv=not(hit("friend/acceptRequest",Ok))
-// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("invalid_user")))
-// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("no_pending_request")))
-// @witness main=friend4 inv=not(hit("friend/rejectRequest",Ok))
-// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("invalid_user")))
-// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("no_pending_request")))
-// @witness main=friend4 inv=not(hit("friend/cancelRequest",Ok))
-// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_user")))
-// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_request")))
-// @witness main=friend4 inv=not(hit("friend/remove",Ok))
-// @witness main=friend4 inv=not(hit("friend/remove",Failed("invalid_user")))
-// @witness main=friend4 inv=not(hit("friend/remove",Failed("not_in_friendlist")))
-// @witness main=friend4 inv=not(hit("env/disconnect",NoReply))
-// @witness main=friend4 inv=not(hit("env/connect",NoReply))
-// @witness main=friend4 inv=not(eventDropped)
-// @witness main=friend4 inv=not(fullFriendCircle)
-// @verify main=friend3 inv=safety steps=3
+// @inv main=friend4 inv=safety steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/list",Ok)) steps=30 samples=50000
+// @witness main=friend4 inv=not(newRequestSent) steps=30 samples=50000
+// @witness main=friend4 inv=not(autoAccepted) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_user"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("already_in_friendlist"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("invalid_request"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("outgoing_capacity_reached"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/sendRequest",Failed("incoming_capacity_reached"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/acceptRequest",Ok)) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("invalid_user"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/acceptRequest",Failed("no_pending_request"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/rejectRequest",Ok)) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("invalid_user"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/rejectRequest",Failed("no_pending_request"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/cancelRequest",Ok)) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_user"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/cancelRequest",Failed("invalid_request"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/remove",Ok)) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/remove",Failed("invalid_user"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("friend/remove",Failed("not_in_friendlist"))) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("env/disconnect",NoReply)) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("env/connect",NoReply)) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("env/reconnect",NoReply)) steps=30 samples=50000
+// @witness main=friend4 inv=not(hit("env/sessionExpired",NoReply)) steps=30 samples=50000
+// @witness main=friend4 inv=not(eventLostInGrace) steps=30 samples=50000
+// @witness main=friend4 inv=not(eventDropped) steps=30 samples=50000
+// @witness main=friend4 inv=not(multipleFriends) steps=30 samples=50000
+// @verify main=friend3 inv=safety steps=2
 module friend {
   import common.* from "./common"
   import schema.* from "./schema"
@@ -53,14 +57,16 @@ module friend {
 
   // Server-side protocol nouns. `friends` is an adjacency map (so that its
   // symmetry is a checked property, not a representation guarantee);
-  // `requests` holds pending requests as (from, to); `online` is the set of
-  // users with a live connection (owned by the session/user group).
+  // `requests` holds pending requests as (from, to); `presence` is owned by the
+  // session group (session.qnt): Online = session with a live socket
+  // (attached), Detached = session in its grace period, Offline = no session.
   type State = {
     friends: UserId -> Set[UserId],
     requests: Set[(UserId, UserId)],
-    online: Set[UserId],
+    presence: UserId -> Presence,
   }
   type Outcome = { state: State, reply: Reply, events: Set[(UserId, Event)] }
+  type Presence = Online | Detached | Offline
 
   const USERS: Set[UserId]      // registered users
   const GHOST: UserId           // a well-formed id of no registered user
@@ -72,6 +78,7 @@ module friend {
 
   // ---- helpers ----
   pure def friendsOf(s: State, u: UserId): Set[UserId] = s.friends.get(u)
+  pure def isOnline(s: State, u: UserId): bool = s.presence.get(u) == Online
   pure def outgoingOf(s: State, u: UserId): Set[UserId] =
     s.requests.filter(r => r._1 == u).map(r => r._2)
   pure def incomingOf(s: State, u: UserId): Set[UserId] =
@@ -84,9 +91,10 @@ module friend {
 
   // README: "These events are automatically sent to the clients if they are
   // connected. To catch up at connection, a client should request friend/list
-  // to get a full state." An event to an offline user is dropped (FRIEND-08).
+  // to get a full state." Only Online users get the event; for Detached and
+  // Offline users it is dropped (FRIEND-08), as in teiserver send_to_player.
   pure def deliver(s: State, rcpt: UserId, e: Event): Set[(UserId, Event)] =
-    if (s.online.contains(rcpt)) Set((rcpt, e)) else Set()
+    if (isOnline(s, rcpt)) Set((rcpt, e)) else Set()
 
   // invalid_user: the id names no registered user, or names the caller.
   // ASSUMPTION FRIEND-05: self-targeting is invalid_user for every command
@@ -124,7 +132,7 @@ module friend {
       ok(befriend(dropRequest(s, t, u), u, t),
          deliver(s, t, RequestAccepted(u)).union(deliver(s, u, RequestAccepted(t))))
     // ASSUMPTION FRIEND-03: outgoing is checked before incoming.
-    else if (outgoingOf(s, u).size() >= MAX_OUTGOING) deny(s, "outgoing_capacity_reached")
+    else if (outgoingOf(s, u).size() > MAX_OUTGOING) deny(s, "outgoing_capacity_reached")
     else if (incomingOf(s, t).size() >= MAX_INCOMING) deny(s, "incoming_capacity_reached")
     else ok({ ...s, requests: s.requests.union(Set((u, t))) },
             deliver(s, t, RequestReceived(u)))
@@ -161,14 +169,19 @@ module friend {
     else ok(unfriend(s, u, t), deliver(s, t, Removed(u)))
 
   // ---- environment ----
-  // A connection opens (or replaces the live one: "one live session per user").
-  // The client then learns the full state from user/self (privateUser carries
-  // friendIds, outgoingFriendRequest, incomingFriendRequest) or friend/list.
-  pure def connect(s: State, u: UserId): Outcome =
-    { state: { ...s, online: s.online.union(Set(u)) }, reply: NoReply, events: Set() }
-  // The connection drops; repeated drops are no-ops. Friend state is persistent.
-  pure def disconnect(s: State, u: UserId): Outcome =
-    { state: { ...s, online: s.online.exclude(Set(u)) }, reply: NoReply, events: Set() }
+  // Session steps, same names and pre-conditions as session.qnt / party.qnt.
+  // Friend state is persistent: no session step changes friends or requests.
+  // On env/connect and env/reconnect the client gets user/self (privateUser:
+  // friendIds, outgoingFriendRequest, incomingFriendRequest) and rebuilds its
+  // view from it (design default: "after reconnect the server sends full state
+  // following user/self"; teiserver tachyon_handler.ex:101).
+  pure def setPresence(s: State, u: UserId, from: Presence, p: Presence): Outcome =
+    if (s.presence.get(u) != from) { state: s, reply: NoReply, events: Set() }   // late/repeated: no-op
+    else { state: { ...s, presence: s.presence.set(u, p) }, reply: NoReply, events: Set() }
+  pure def connect(s: State, u: UserId): Outcome = setPresence(s, u, Offline, Online)
+  pure def disconnect(s: State, u: UserId): Outcome = setPresence(s, u, Online, Detached)
+  pure def reconnect(s: State, u: UserId): Outcome = setPresence(s, u, Detached, Online)
+  pure def sessionExpired(s: State, u: UserId): Outcome = setPresence(s, u, Detached, Offline)
 
   // ---- reference client ----
   // A client that keeps its View from replies and events only. viewsInSync
@@ -206,7 +219,8 @@ module friend {
     if (x == u and o.reply == Ok) clientOnOk(v, cmd, t, o.state, x) else v
   pure def clientStep(v: View, x: UserId, cmd: str, u: UserId, t: UserId,
                       o: Outcome, replyFirst: bool): View =
-    if (cmd == "env/connect" and x == u) serverView(o.state, x)   // user/self
+    if ((cmd == "env/connect" or cmd == "env/reconnect") and x == u and isOnline(o.state, x))
+      serverView(o.state, x)   // user/self
     else if (replyFirst) clientEvents(clientReply(v, x, cmd, u, t, o), x, o.events)
     else clientReply(clientEvents(v, x, o.events), x, cmd, u, t, o)
 
@@ -218,7 +232,7 @@ module friend {
   var lastEvents: Set[(UserId, Event)]
   var lastCaller: UserId
   var lastTarget: UserId
-  var views: UserId -> View        // each client's belief (meaningful while online)
+  var views: UserId -> View        // each client's belief (meaningful while Online)
 
   action applyOrdered(cmd: str, u: UserId, t: UserId, o: Outcome, replyFirst: bool): bool = all {
     s' = o.state, prevS' = s, lastCmd' = cmd, lastReply' = o.reply, lastEvents' = o.events,
@@ -229,7 +243,7 @@ module friend {
 
   pure val emptyView: View = { friends: Set(), outgoing: Set(), incoming: Set() }
   pure val initState: State =
-    { friends: USERS.mapBy(_ => Set()), requests: Set(), online: USERS }
+    { friends: USERS.mapBy(_ => Set()), requests: Set(), presence: USERS.mapBy(_ => Online) }
   action init = all {
     s' = initState, prevS' = initState,
     lastCmd' = "init", lastReply' = NoReply, lastEvents' = Set(),
@@ -242,7 +256,7 @@ module friend {
     nondet t = USERS.union(Set(GHOST)).oneOf()
     nondet replyFirst = Set(true, false).oneOf()
     any {
-      all { s.online.contains(u), any {
+      all { isOnline(s, u), any {
         applyOrdered("friend/list", u, u, list(s, u), replyFirst),
         applyOrdered("friend/sendRequest", u, t, sendRequest(s, u, t), replyFirst),
         applyOrdered("friend/acceptRequest", u, t, acceptRequest(s, u, t), replyFirst),
@@ -252,6 +266,8 @@ module friend {
       }},
       applyOrdered("env/connect", u, u, connect(s, u), replyFirst),
       applyOrdered("env/disconnect", u, u, disconnect(s, u), replyFirst),
+      applyOrdered("env/reconnect", u, u, reconnect(s, u), replyFirst),
+      applyOrdered("env/sessionExpired", u, u, sessionExpired(s, u), replyFirst),
     }
   }
 
@@ -282,13 +298,13 @@ module friend {
     | RequestReceived(f) => f | RequestRejected(f) => f
   }
   // Events go only to the two users involved, name the other one, and only to
-  // connected users.
+  // Online users.
   val eventsToInvolvedOnly = lastEvents.forall(m => and {
     Set(lastCaller, lastTarget).contains(m._1),
     Set(lastCaller, lastTarget).contains(evFrom(m._2)),
     evFrom(m._2) != m._1,
   })
-  val eventsOnlyToOnline = lastEvents.forall(m => s.online.contains(m._1))
+  val eventsOnlyToOnline = lastEvents.forall(m => isOnline(s, m._1))
   // Each event kind comes from exactly one command (requestAccepted: accept or
   // the auto-accepting sendRequest).
   pure def eventCmd(e: Event): Set[str] = match e {
@@ -308,14 +324,18 @@ module friend {
   // friend/list changes nothing.
   val listIsReadOnly = lastCmd == "friend/list" implies s == prevS
   // Every connected client that tracked replies and events agrees with the server.
-  val viewsInSync = s.online.forall(u => views.get(u) == serverView(s, u))
+  val viewsInSync = USERS.forall(u => isOnline(s, u) implies views.get(u) == serverView(s, u))
+  // Session steps never touch friend state.
+  val sessionStepsKeepFriends = lastCmd.in(Set("env/connect", "env/disconnect", "env/reconnect",
+    "env/sessionExpired")) implies (s.friends == prevS.friends and s.requests == prevS.requests)
 
   val reasonsInSchema = replyInSchema(lastCmd, lastReply)
 
   val safety = and {
     symmetric, noSelfRelations, onlyKnownUsers, noRequestBetweenFriends,
     noCrossingRequests, withinCapacity, eventsToInvolvedOnly, eventsOnlyToOnline,
-    eventsMatchCommand, denialIsNoop, listIsReadOnly, viewsInSync, reasonsInSchema,
+    eventsMatchCommand, denialIsNoop, listIsReadOnly, viewsInSync, sessionStepsKeepFriends,
+    reasonsInSchema,
   }
 
   // ---- witnesses (check.sh expects not(...) of these to be violated) ----
@@ -326,9 +346,16 @@ module friend {
   // A successful command whose event was dropped because the peer is offline.
   val eventDropped = and {
     lastReply == Ok, lastEvents == Set(), USERS.contains(lastTarget), lastCaller != lastTarget,
-    not(s.online.contains(lastTarget)),
+    not(isOnline(s, lastTarget)),
   }
-  // Somebody is friends with everybody else (friend lists are not capped).
+  // ... and specifically because the peer was in its grace period (SESSION-05).
+  val eventLostInGrace = and {
+    eventDropped, s.presence.get(lastTarget) == Detached,
+  }
+  // Somebody has several friends (more than MAX_INCOMING). A full circle
+  // (friends with everybody, more than MAX_OUTGOING) is too rare for random
+  // simulation; noFriendCapTest shows it.
+  val multipleFriends = USERS.exists(u => friendsOf(s, u).size() > MAX_INCOMING)
   val fullFriendCircle = USERS.exists(u => friendsOf(s, u).size() == USERS.size() - 1)
   // Unreachable in this model: unauthorized, internal_error,
   // command_unimplemented (scopes, storage and dispatch are not modelled) and
@@ -430,21 +457,41 @@ module friend4 {
       .expect(lastReply == Ok and friendsOf(s, "a") == Set("c"))  // auto-accept; a's outgoing was full
       .expect(outgoingOf(s, "a") == Set("b") and withinCapacity and viewsInSync)
 
-  // Offline recipient: the event is dropped; the state catches up at connect
-  // (user/self) or with friend/list.
-  run offlineTest =
+  // No friend-list cap (FRIEND-04): a has 3 friends > MAX_OUTGOING = 2, and
+  // can still receive and accept requests.
+  run noFriendCapTest =
+    init
+      .then(apply("friend/sendRequest", "b", "a", sendRequest(s, "b", "a")))
+      .then(apply("friend/acceptRequest", "a", "b", acceptRequest(s, "a", "b")))
+      .then(apply("friend/sendRequest", "c", "a", sendRequest(s, "c", "a")))
+      .then(apply("friend/acceptRequest", "a", "c", acceptRequest(s, "a", "c")))
+      .then(apply("friend/sendRequest", "a", "d", sendRequest(s, "a", "d")))
+      .then(apply("friend/acceptRequest", "d", "a", acceptRequest(s, "d", "a")))
+      .expect(lastReply == Ok and fullFriendCircle and friendsOf(s, "a") == Set("b", "c", "d"))
+      .then(apply("friend/remove", "d", "a", remove(s, "d", "a")))
+      .expect(lastEvents == Set(("a", Removed("d"))) and viewsInSync)
+
+  // Grace period: an event to a Detached user is dropped; the state comes
+  // back with user/self at env/reconnect. Offline (session expired) users get
+  // it at env/connect. Late/repeated session steps are no-ops.
+  run presenceTest =
     init
       .then(apply("env/disconnect", "b", "b", disconnect(s, "b")))
       .then(apply("friend/sendRequest", "a", "b", sendRequest(s, "a", "b")))
-      .expect(lastReply == Ok and lastEvents == Set() and eventDropped)
-      .then(apply("env/connect", "b", "b", connect(s, "b")))
-      .expect(views.get("b").incoming == Set("a"))
+      .expect(lastReply == Ok and lastEvents == Set() and eventLostInGrace)
+      .then(apply("env/reconnect", "b", "b", reconnect(s, "b")))
+      .expect(views.get("b").incoming == Set("a") and viewsInSync)   // via user/self
       .then(apply("env/disconnect", "a", "a", disconnect(s, "a")))
+      .then(apply("env/sessionExpired", "a", "a", sessionExpired(s, "a")))
+      .expect(s.presence.get("a") == Offline and outgoingOf(s, "a") == Set("b"))
       .then(apply("friend/acceptRequest", "b", "a", acceptRequest(s, "b", "a")))
-      .expect(lastReply == Ok and lastEvents == Set())
-      .then(apply("env/disconnect", "a", "a", disconnect(s, "a")))  // repeated drop: no-op
+      .expect(lastReply == Ok and lastEvents == Set() and eventDropped)
+      .then(apply("env/sessionExpired", "a", "a", sessionExpired(s, "a")))  // late timer: no-op
+      .expect(s == prevS)
+      .then(apply("env/reconnect", "a", "a", reconnect(s, "a")))            // no session: no-op
       .expect(s == prevS)
       .then(apply("env/connect", "a", "a", connect(s, "a")))
+      .expect(views.get("a") == { friends: Set("b"), outgoing: Set(), incoming: Set() })
       .then(apply("friend/list", "a", "a", list(s, "a")))
       .expect(listData(s, "a").friends == Set("b") and viewsInSync)
 }
