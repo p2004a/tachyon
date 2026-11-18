@@ -15,7 +15,7 @@
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","queued"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","replaced"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","party_queued"))
-// @witness main=matchmaking_test inv=not(hit("matchmaking/queue","already_in_battle"))
+// @witness main=matchmaking_test inv=not(hit("matchmaking/queue","already_in_battle")) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","in_lobby"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","invalid_queue_specified"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","version_mismatch"))
@@ -23,30 +23,31 @@
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","party_too_big"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/queue","party_missing_asset"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/cancel","left_queue"))
-// @witness main=matchmaking_test inv=not(hit("matchmaking/cancel","declined"))
+// @witness main=matchmaking_test inv=not(hit("matchmaking/cancel","declined")) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(hit("matchmaking/cancel","not_queued"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/ready","readied"))
 // @witness main=matchmaking_test inv=not(hit("matchmaking/ready","all_ready"))
-// @witness main=matchmaking_test inv=not(hit("matchmaking/ready","already_ready"))
+// @witness main=matchmaking_test inv=not(hit("matchmaking/ready","already_ready")) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(hit("matchmaking/ready","no_match"))
 // @witness main=matchmaking_test inv=not(hit("env/match","found"))
 // @witness main=matchmaking_test inv=not(hit("env/readyTimeout","lost"))
-// @witness main=matchmaking_test inv=not(hit("env/battleStarted","started"))
-// @witness main=matchmaking_test inv=not(hit("env/startGaveUp","gave_up"))
+// @witness main=matchmaking_test inv=not(hit("env/battleStarted","started")) steps=40 samples=40000
+// @witness main=matchmaking_test inv=not(hit("env/startGaveUp","gave_up")) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(hit("env/queueUpdate","sent"))
 // @witness main=matchmaking_test inv=not(hit("env/versionChanged","bumped"))
 // @witness main=matchmaking_test inv=not(hit("env/partyLeave","party_unqueued"))
 // @witness main=matchmaking_test inv=not(hit("env/partyJoin","solo_cancelled"))
 // @witness main=matchmaking_test inv=not(hit("env/sessionEnded","withdrawn"))
-// @witness main=matchmaking_test inv=not(found2v2WithParty)
+// @witness main=matchmaking_test inv=not(found2v2WithParty) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(requeuedAfterLost)
-// @witness main=matchmaking_test inv=not(staleRequeueCancelled)
+// @witness main=matchmaking_test inv=not(staleRequeueCancelled) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(cancelledWith("intentional"))
-// @witness main=matchmaking_test inv=not(cancelledWith("server_error"))
+// @witness main=matchmaking_test inv=not(cancelledWith("server_error")) steps=40 samples=40000
 // @witness main=matchmaking_test inv=not(cancelledWith("party_user_left"))
 // @witness main=matchmaking_test inv=not(cancelledWith("ready_timeout"))
 // @witness main=matchmaking_test inv=not(cancelledWith("version_changed"))
 // @verify main=matchmaking_test inv=safety steps=2
+// (verify: no violation at 2 steps in ~190 s with JVM_ARGS=-Xmx6G; 3 steps not attempted, see findings)
 module matchmaking {
   import common.* from "./common"
 
