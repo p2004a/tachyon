@@ -89,9 +89,9 @@ convention.
 - To verify: Tachyon should say that a queued party cannot change membership or invite, and when that ends.
 
 ### INT-D4: Activity slot: at most one of {lobby, matchmaking ticket, matchmaking battle}
-- Kind: Decision (composition); proposed default PD-03 (README.md)
+- Kind: Decision (composition); proposed default PD-03 (DECISIONS.md)
 - Evidence:
-  - Proposed default PD-03 (README.md): a user is in at most one of lobby, matchmaking ticket, matchmaking battle, and queueing from a lobby fails with `invalid_request`. Tachyon has no such rule.
+  - Proposed default PD-03 (DECISIONS.md): a user is in at most one of lobby, matchmaking ticket, matchmaking battle, and queueing from a lobby fails with `invalid_request`. Tachyon has no such rule.
   - LOBBY-03, MM-04, MM-17. teiserver enforces none of it (INT-01, noted against PD-03).
 - Spec choice:
   - A battle started from a lobby counts as the lobby's slot while the user is a member of that lobby (`ownLobbyBattle`). Any other running battle is its own slot (`slotBattle`; see INT-03 for lobby battles a user left).
@@ -159,7 +159,7 @@ convention.
 - Kind: Gap + Assumption (+ Divergence-teiserver)
 - Evidence:
   - matchmaking.md:28: "If any client's `assetStatus` response is `missing`, `downloading`, or if it times out without sending a response, the matchmaking `queue` request will fail."
-  - A Detached member cannot answer checkAssets. Proposed default PD-02 (README.md): party membership survives a socket drop (party.qnt `sessionsOwnParties`).
+  - A Detached member cannot answer checkAssets. Proposed default PD-02 (DECISIONS.md): party membership survives a socket drop (party.qnt `sessionsOwnParties`).
   - teiserver sends no checkAssets (MM-20). party/server.ex:361-406 queues every member id without looking at their session. A Detached member is put in the queue (session.ex:1498-1512, `send_to_player` drops the queuesJoined), and later fails the ready check, which removes the whole party.
 - Implementation part (Divergence-teiserver): no checkAssets (MM-20); a Detached member is queued and later fails
   the ready check.

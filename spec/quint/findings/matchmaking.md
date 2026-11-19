@@ -39,7 +39,7 @@ core branches (queue, ready, match) several times, which weights only the random
   in one." The same schema lists `{ status: "failed", reason: "already_queued" }` (`queue.ts:37`). Nothing says when
   `already_queued` applies. If a new request always replaces the old one, the reason can never occur. user/self also
   has a third state, `found` (`definitions/privateUser.ts:20-33`), which the description does not cover.
-- Spec choice: proposed default PD-05 (README.md). A request from a searching user (or any member of a searching party) replaces the
+- Spec choice: proposed default PD-05 (DECISIONS.md). A request from a searching user (or any member of a searching party) replaces the
   ticket (`queue`, why `replaced`). `already_queued` applies only once a match is found for any member of the queueing
   unit, in either the `ReadyCheck` or the `Starting` phase. ASSUMPTION MM-01.
 - To verify: change the description to "Replaces the previous queue request while searching. Fails with
@@ -63,7 +63,7 @@ core branches (queue, ready, match) several times, which weights only the random
 
 ### MM-04: Queueing while in a lobby, or while a party member is in a lobby or battle
 - Kind: Gap + Proposed default (PD-03)
-- Evidence: Tachyon does not say. Proposed default PD-03 (README.md): a user is in at most one of lobby, matchmaking
+- Evidence: Tachyon does not say. Proposed default PD-03 (DECISIONS.md): a user is in at most one of lobby, matchmaking
   ticket, matchmaking battle, and queueing from a lobby fails with `invalid_request`.
 - Spec choice: if any member of the queueing unit (the party, or the caller alone) is in a battle →
   `already_in_battle`. If any member is in a lobby → `invalid_request`. `activityExclusive` is an invariant. The lobby
@@ -162,7 +162,7 @@ core branches (queue, ready, match) several times, which weights only the random
 ### MM-13: The autohost start is retried forever; nothing says when the server gives up
 - Kind: Gap + Assumption
 - Evidence: README 8: "If the autohost doesn't respond quickly, or if it sends a failed response, the server should
-  repeat this step." Proposed default PD-09 (README.md): matchmaking retries on another autohost.
+  repeat this step." Proposed default PD-09 (DECISIONS.md): matchmaking retries on another autohost.
 - Spec choice: `startFailed` is a no-op (the match stays `Starting`). `startGaveUp` (ASSUMPTION) removes the match and
   sends `lost` + `cancelled(server_error)` to all its members. `cancel` stays possible in `Starting` and acts as a
   decline. The autohost-side cleanup is out of scope.
@@ -187,7 +187,7 @@ core branches (queue, ready, match) several times, which weights only the random
 - Review: Partial, Low
 - Evidence: `session.ex:633-637`: `{:searching, _} -> {:reply, {:error, :already_queued}, state}` and the same for
   `{:pairing, _}`. Test `matchmaking_test.exs:189-194` asserts it. `queue.ts` is itself contradictory (MM-01), and
-  teiserver implements the consistent `already_queued` reading. PD-05 (README.md) proposes replace while searching;
+  teiserver implements the consistent `already_queued` reading. PD-05 (DECISIONS.md) proposes replace while searching;
   teiserver's choice is noted, not a divergence.
 - Spec choice: replace (`queue`, why `replaced`).
 - Implementation part (Divergence-bar-lobby): never re-queues while searching (the button exists only in `Idle`, `views/play/matchmaking.vue:67,83`).
@@ -206,7 +206,7 @@ core branches (queue, ready, match) several times, which weights only the random
   branch and keeps the lobby.
 - Implementation part (Divergence-teiserver): queueing while in a battle succeeds, so the schema reason
   `already_in_battle` (`src/schema/matchmaking/queue.ts:38`) is never returned.
-- Not a divergence: the lobby half (queued and in a lobby at once) is measured against PD-03 (README.md); Tachyon is
+- Not a divergence: the lobby half (queued and in a lobby at once) is measured against PD-03 (DECISIONS.md); Tachyon is
   silent (MM-04).
 - Spec choice: MM-04 guards; `activityExclusive`.
 - To verify: teiserver test: join a lobby, then `matchmaking/queue` → expect `invalid_request` (under PD-03). Start a battle, then
@@ -310,7 +310,7 @@ Entries under Protocol that also carry an implementation part (marked in the ent
 - Review: Confirmed, Medium
 - Evidence: `pairing_room.ex:121-150`: no autohost, or `start_battle` error → `disband_pairing` and
   `notify_lost({:server_error, reason})` to everyone → the sessions send `lost` + `cancelled(server_error)` and leave
-  all queues (`session.ex:1290-1296`). README 8 says "the server should repeat this step", and proposed default PD-09 (README.md) retries on
+  all queues (`session.ex:1290-1296`). README 8 says "the server should repeat this step", and proposed default PD-09 (DECISIONS.md) retries on
   another autohost. teiserver also sends a `details` field with `server_error` (`tachyon_handler.ex:163`) that the
   `cancelled` schema does not define.
 - Spec choice: `startFailed` = retry (no-op); `startGaveUp` is the teiserver behaviour, allowed as an eventual step

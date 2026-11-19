@@ -64,7 +64,7 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 ### SESSION-05: Reconnect: no full-state resend for subscriptions (PD-08); clients cannot tell resumed from fresh sessions; bar-lobby never re-subscribes friends
 - Kind: Proposed default (PD-08) + Gap + Divergence-bar-lobby (friends)
 - Review: Partial, High
-- Evidence: proposed default PD-08 (README.md): after a reconnect the server sends full state following
+- Evidence: proposed default PD-08 (DECISIONS.md): after a reconnect the server sends full state following
   `user/self`. Tachyon promises no resend: user.md:387 only says user/self "should be sent to a user when they
   login". teiserver drops events while detached (`session.ex:1910-1918` `send_to_player`: "TODO tachyon_mvp: what
   should server do if the connection is down at that time? The best is likely to store it…") and on reconnect

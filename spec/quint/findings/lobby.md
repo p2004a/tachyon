@@ -46,7 +46,7 @@ The server->user `battle/start` request is the event `BattleStart`.
 - Kind: Proposed default (PD-03)
 - Review: Partial, Medium
 - Evidence:
-  - Proposed default PD-03 (README.md): a user is in at most one of lobby, matchmaking ticket, matchmaking battle, and queueing from a lobby fails with `invalid_request`. Tachyon has no such rule; only `matchmaking/queue`'s `already_in_battle` reason implies part of it (MM-17).
+  - Proposed default PD-03 (DECISIONS.md): a user is in at most one of lobby, matchmaking ticket, matchmaking battle, and queueing from a lobby fails with `invalid_request`. Tachyon has no such rule; only `matchmaking/queue`'s `already_in_battle` reason implies part of it (MM-17).
   - teiserver does not enforce PD-03 (noted, not a divergence):
     - session.ex:952-1001 lobby create/join only check `state.lobby`, not `state.matchmaking` or `state.battle`.
     - session.ex:611 `handle_call({:matchmaking, {:join_queues, queues}}, ...)` does not check `state.lobby`.
@@ -84,7 +84,7 @@ The server->user `battle/start` request is the event `BattleStart`.
 ### LOBBY-10: Lobby size limit: teiserver's is 251 counting bots; PD-04 proposes 256 members
 - Kind: Proposed default (PD-04). Divergence refuted (was Divergence-teiserver): Tachyon has no lobby size limit, and teiserver's 251 (bots included) is a documented engine limit
 - Review: Refuted
-- Evidence: proposed default PD-04 (README.md): "A lobby holds at most 256 members, players and spectators together".
+- Evidence: proposed default PD-04 (DECISIONS.md): "A lobby holds at most 256 members, players and spectators together".
   Tachyon has no 256 or 251 (`docs/schema/lobby.md`, `src/schema/lobby`). teiserver lobby.ex:450 `when map_size(data.spectators) + map_size(data.players) >= 251`, where `data.players` includes bots.
 - Spec choice: `MAX_MEMBERS` bounds human members (players + spectators). Bots are bounded by ally team capacity.
 - To verify: decide whether to adopt PD-04 and whether bots count. 251 is the engine limit on specs + players + bots.
@@ -167,7 +167,7 @@ The server->user `battle/start` request is the event `BattleStart`.
   - The protocol never says what happens to a member whose connection drops. teiserver keeps them in the lobby for the session lifetime: the lobby monitors the session pid (lobby.ex `{:DOWN, ...} {:user, user_id}`).
   - lobby/updated events sent while the user is disconnected are lost.
   - On reconnect, user/self carries only `currentLobby` (tachyon_handler.ex:1121), and bar-lobby re-issues lobby/join to fetch the state (lobby.store.ts:85 `requestJoinLobby({ id: lobbyId, pushLobbyView: false })`).
-  - Proposed default PD-08 (README.md): after a reconnect the server sends full state following `user/self`. teiserver sends no lobby details (noted, not a divergence: Tachyon is silent).
+  - Proposed default PD-08 (DECISIONS.md): after a reconnect the server sends full state following `user/self`. teiserver sends no lobby details (noted, not a divergence: Tachyon is silent).
   - When the session ends, the user is removed with no lobby/left (they are gone).
 - Spec choice: `env/sessionExpired` removes the user with no lobby/left and drops their list subscription (ASSUMPTION LOBBY-A15), except while the user is in the lobby's running battle (INT-D2). Socket drop, reconnect and takeover are not lobby steps: lobby state belongs to the session, which survives them (INT-D1).
 - To verify: document the disconnect lifetime, and whether full lobby state follows user/self.
@@ -400,7 +400,7 @@ These predicates are over this module's state `s`, for a user `u`:
   - `isRunning(s.lobbies.get(id).battle)`
   - `s.subscribers`: lobby-list subscriptions, owned by the session.
 - **Assumed about matchmaking and battle (`s.elsewhere`, driven by `env/otherActivity`):**
-  - matchmaking/queue and a matchmaking battle require `not(inLobby(s, u))`. This is proposed default PD-03 (README.md).
+  - matchmaking/queue and a matchmaking battle require `not(inLobby(s, u))`. This is proposed default PD-03 (DECISIONS.md).
   - In return, lobby/create and lobby/join require `not(u in elsewhere)`.
   - Composition invariant: `∀u. inLobby(u) ⇒ ¬inMatchmaking(u) ∧ ¬inMatchmakingBattle(u)`.
   - Lobby battles are excluded from the activity slot (LOBBY-03).

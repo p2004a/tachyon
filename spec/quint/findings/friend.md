@@ -58,7 +58,7 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
   teiserver's meaning (friends + incoming + outgoing ≥ 300). teiserver's counting is a choice Tachyon leaves open,
   not a divergence.
 - Spec choice: ASSUMPTION — `MAX_OUTGOING` bounds the caller's pending outgoing requests, `MAX_INCOMING` the
-  target's pending incoming requests (server settings, proposed default PD-07 in README.md); outgoing checked first (`sendRequest`,
+  target's pending incoming requests (server settings, proposed default PD-07 in DECISIONS.md); outgoing checked first (`sendRequest`,
   invariant `withinCapacity`).
 - To verify: protocol owners pick one definition and write it in the sendRequest description; bar-lobby's
   message is wrong for teiserver's definition (a user with 300 friends is told "too many outgoing requests").
@@ -98,7 +98,7 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
 
 ### FRIEND-07: Mutual requests: the second request accepts the first — protocol silent; reply can't tell
 - Kind: Gap + Proposed default (PD-06; teiserver matches)
-- Evidence: Tachyon says nothing. Proposed default PD-06 (README.md): "the second request accepts the first". teiserver
+- Evidence: Tachyon says nothing. Proposed default PD-06 (DECISIONS.md): "the second request accepts the first". teiserver
   `account.ex:1985-2053` (`create_friend_request`: `case get_friend_request(to_user_id, from_user_id)` ->
   `accept_friend_request(existing_request)` -> `{:ok, :auto_accepted}`) and `tachyon_handler.ex:562-564`:
   `requestAccepted` to the target (from = caller) **and** to the caller (from = target). Test

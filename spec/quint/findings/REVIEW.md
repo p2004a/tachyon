@@ -20,7 +20,7 @@ Severity is given for confirmed and partial entries:
 - **Medium**: wrong reason or event, recoverable.
 - **Low**: everything else.
 
-**A systematic caveat.** Several entries measure teiserver against *proposed defaults* (README.md): the
+**A systematic caveat.** Several entries measure teiserver against *proposed defaults* (DECISIONS.md): the
 activity slot (PD-03), the 256-member limit (PD-04), battles that survive an autohost disconnect (PD-10), full-state
 resend after reconnect (PD-08), and majority-of-players results (PD-11). These are **not** in Tachyon (`grep` over `docs/` and `src/schema/`
 finds none of them). Those entries are marked P (or R when nothing else is left). They should go to protocol owners

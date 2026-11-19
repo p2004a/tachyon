@@ -68,7 +68,7 @@ of this file.
 - Kind: Proposed default (PD-10)
 - Review: Partial, High (engines keep running untracked and cannot be killed, AH-03)
 - Evidence:
-  - Tachyon (`docs/schema/autohost.md`) says nothing about autohost disconnects. Proposed default PD-10 (README.md): battles survive an autohost disconnect for an autohost grace period, then are closed as lost and the players' activity slots are freed. teiserver's behaviour below is noted against PD-10, not counted as a divergence.
+  - Tachyon (`docs/schema/autohost.md`) says nothing about autohost disconnects. Proposed default PD-10 (DECISIONS.md): battles survive an autohost disconnect for an autohost grace period, then are closed as lost and the players' activity slots are freed. teiserver's behaviour below is noted against PD-10, not counted as a divergence.
   - teiserver lib/teiserver/autohost/session.ex:2-5 "a process tied to a autohost connection in such a way that it survives if the connection goes away". But :120-121 `Process.link(conn_pid)` / `Process.flag(:trap_exit, true)` and :266-272 `{:EXIT, from, reason}` -> `{:stop, reason}`: the session stops with the connection. The `data.conn_pid == nil` guards (:150, :170, :189, :203) are dead code.
   - lib/teiserver/tachyon_battle/battle.ex:155-159 "the timeout is absurdly short because there is no real recovery if the autohost goes away", `autohost_timeout: Map.get(args, :autohost_timeout, 100)`. :311-320: on DOWN, a timer, then `{:stop, :normal, state}`. No `end_tachyon_match` and no kill. Players still get a `battle/ended`: AH-10's placeholder, sent by their own session's `{:battle, id}` monitor.
 - Spec choice: `disconnect` keeps PRunning battles and `graceExpired` makes them PLost with battle/ended. `noForgottenBattles` is in `safety`: every engine an autohost runs is a battle the server still tracks with `mayRun`. teiserver breaks it: after the 100 ms the engine keeps running and nothing tracks it.
@@ -108,7 +108,7 @@ of this file.
 - Evidence:
   - schema/autohost/update/event.json:32 "The battle finished, generated once per every single player reporting who won."
   - teiserver battle.ex:379-393: `min_required_votes = (finished_reports |> Map.keys() |> Enum.count()) / 2`. A single report out of 8 players decides the result. battle.ex:48 "this majority voting won't work for 1v1s".
-  - Tachyon defines no aggregation rule. Proposed default PD-11 (README.md): one result by majority of per-player finished reports, else no result. teiserver's rule is noted, not counted as a divergence; with its strict `>`, 1 report out of N decides, which deserves owner attention.
+  - Tachyon defines no aggregation rule. Proposed default PD-11 (DECISIONS.md): one result by majority of per-player finished reports, else no result. teiserver's rule is noted, not counted as a divergence; with its strict `>`, 1 report out of N decides, which deserves owner attention.
 - Spec choice: `majority(b, TEAMS)` takes a strict majority over `b.players`; otherwise there is no result (-1). Transcript `noMajorityTest`.
 - To verify: protocol owners: the majority of which set? 1v1: two disagreeing reports -> none.
 
@@ -210,7 +210,7 @@ of this file.
   - tachyon docs/schema/matchmaking.md:14 "If the autohost doesn't respond quickly, or if it sends a failed response, the server should repeat this step."
   - session.ex:40 "TODO: there should be some kind of retry here". matchmaking/pairing_room.ex:143-157: on `{:error, reason}` it disbands and sends `matchmaking/lost`, with no other autohost tried. tachyon_lobby/lobby.ex:1078-1081: the error goes back to the lobby caller.
   - `battle_already_exists` and `engine_version_not_available` are only passed on as strings (autohost/tachyon_handler.ex:238-244). No test sends `battle_already_exists`.
-  - Proposed default PD-09 (README.md): a retried start answered `battle_already_exists` is killed and failed, and matchmaking retries on another autohost. The kill-and-fail half is measured against PD-09 and only noted; the divergence is the missing retry.
+  - Proposed default PD-09 (DECISIONS.md): a retried start answered `battle_already_exists` is killed and failed, and matchmaking retries on another autohost. The kill-and-fail half is measured against PD-09 and only noted; the divergence is the missing retry.
 - Spec choice: `retryStart` (same battle id, same autohost) and `onResponse`: `battle_already_exists` -> PFailed with the kill obligation kept. A retry on another autohost is a new battle (`requestBattle`) and is the matchmaking/lobby module's choice. Transcript `retryAlreadyExistsTest`.
 - To verify: protocol: does "repeat this step" reuse the battleId? That decides whether `battle_already_exists` can happen at all; with fresh UUIDs per attempt (teiserver tachyon_battle.ex:47) it cannot.
 

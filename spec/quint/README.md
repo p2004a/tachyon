@@ -5,6 +5,15 @@ group. Each command is a pure function `(state, caller, args) -> Outcome`
 with the new state, the reply to the caller and the events per recipient.
 Storage, gateways, retries, authentication and timing are out of scope.
 
+## Start here
+
+1. [`DECISIONS.md`](DECISIONS.md): the 18 protocol decisions that need an owner's answer.
+2. This README: what the checks cover and the conventions every module follows.
+3. One module end to end: `party.qnt` with `findings/party.md`. Every other group has the same layout.
+4. `system.qnt` with `findings/system.md`: what breaks only when the groups are combined.
+5. Implementation bugs to file: the `## Implementation (teiserver b36429f, bar-lobby ee58acd)` part of each
+   `findings/<group>.md`; each entry has a `Review:` verdict from `findings/REVIEW.md`.
+
 Toolchain: Quint 0.33.1 (`npm i -g @informalsystems/quint@0.33.1`), Rust
 evaluator v0.7.1, Apalache 0.62.4 for `quint verify`.
 
@@ -27,6 +36,7 @@ python3 tools/gen_schema_reasons.py > schema.qnt   # regenerate from ../../schem
 | `findings/<group>.md` | gaps, contradictions, divergences and assumptions found while writing the module |
 | `findings/system.md` | cross-group decisions (INT-D1..D5) and findings (INT-01..11) |
 | `findings/REVIEW.md` | independent review of every implementation-divergence entry |
+| `DECISIONS.md` | open protocol decisions and the proposed defaults PD-01..PD-11 |
 
 ## What the checks cover
 
@@ -43,25 +53,10 @@ python3 tools/gen_schema_reasons.py > schema.qnt   # regenerate from ../../schem
 Implementation behaviour (teiserver, bar-lobby) is not executed. Divergences are read from the code at
 teiserver `b36429f` and bar-lobby `ee58acd`.
 
-## Proposed protocol defaults (not yet in Tachyon)
+## Proposed protocol defaults
 
-Where Tachyon is silent the models need some rule. The rules below are proposals; none of them is stated in
-`docs/` or `schema/`. Findings that compare an implementation against one of them are recorded as `Gap` /
-`Proposed default`, not as a divergence. Each needs a decision from the protocol owners.
-
-| ID | Proposed default | Used by |
-|---|---|---|
-| PD-01 | One live session per user. A new connection replaces the old one (takeover); the session survives. | session, messaging, system (INT-D1) |
-| PD-02 | Session grace period. A dropped socket leaves the session detached; party and queue membership last until grace expires; a detached member fails the ready check; presence turns `offline` only at expiry. | session, party, matchmaking, system |
-| PD-03 | Activity slot. A user is in at most one of lobby, matchmaking ticket, matchmaking battle. Queueing from a lobby fails with `invalid_request`. | lobby, matchmaking, system (INT-D4) |
-| PD-04 | A lobby holds at most 256 members, players and spectators together (a small constant in the model). | lobby |
-| PD-05 | `matchmaking/queue` from a searching user replaces the ticket; after a match is found it fails with `already_queued`. Resolves MM-01. | matchmaking |
-| PD-06 | Mutual friend requests: the second request accepts the first. | friend |
-| PD-07 | Party invite timeout, party `maxMembers` and friend capacities are server settings. | party, friend |
-| PD-08 | After a reconnect the server sends full state following `user/self`. | session, lobby, friend |
-| PD-09 | A retried `autohost/start` answered with `battle_already_exists` is treated as unknown: kill the battle and fail the start; matchmaking retries on another autohost. | autohost, system |
-| PD-10 | Battles survive an autohost disconnect for an autohost grace period, then are closed as lost and the players' activity slots are freed. | autohost, system |
-| PD-11 | Battle result: one result by majority of per-player finished reports, else no result. | autohost |
+Where Tachyon is silent the models use a proposed default, `PD-01`..`PD-11`. They are defined, with the
+alternatives, in [`DECISIONS.md`](DECISIONS.md).
 
 ## Conventions (all modules)
 
@@ -73,7 +68,7 @@ Where Tachyon is silent the models need some rule. The rules below are proposals
    `{ state, reply: Reply, events: Set[(UserId, Event)] }`. Each definition
    quotes the Tachyon sentence it implements (`docs/schema/<group>.md` or the
    schema `description`), or is tagged `// ASSUMPTION <ID>` pointing to a
-   findings entry or a `PD-nn` above.
+   findings entry or a `PD-nn` in `DECISIONS.md`.
 3. **Denials** are ordinary outcomes: state unchanged, no events,
    `Failed(reason)`. The reason must be in that command's schema enum;
    every module states `val reasonsInSchema = replyInSchema(lastCmd, lastReply)`
@@ -124,7 +119,7 @@ Each file has two parts: **Protocol (Tachyon)** findings and **Implementation** 
 ```
 
 Gap = the protocol is silent. Contradiction = two parts of Tachyon disagree.
-Proposed default = the protocol is silent and the model uses a `PD-nn` rule above; an implementation that
+Proposed default = the protocol is silent and the model uses a `PD-nn` rule from `DECISIONS.md`; an implementation that
 differs from it is noted, not counted as a divergence. Assumption = a modelling choice not stated anywhere.
 Divergence = an implementation behaves differently from Tachyon text (cite code). Entries refuted by
 `REVIEW.md` stay, marked `Refuted`, with the reason.

@@ -171,7 +171,7 @@ samples × 30 steps (about 10 s), and 37 witnesses: 40 result lines, all `ok`, i
 - To verify: add the "locked while queued" rule to party.md, and say whether `kickMember` counts as "leaves".
 
 ### PARTY-19: Events to detached members are dropped; user/self on reconnect is the repair
-- Kind: Assumption (consistent with proposed defaults PD-02 and PD-08 (README.md) and both implementations)
+- Kind: Assumption (consistent with proposed defaults PD-02 and PD-08 (DECISIONS.md) and both implementations)
 - Evidence: `party.md:15` "sent to all connected members and invited players". teiserver `send_to_player!`
   (`session.ex:1950-1959`): "player get full party state upon connection, so party events can be not persisted". On
   reconnect: `build_self_state` (`session.ex:1816-1826`) puts `party`/`invitedToParties` in `user/self`
