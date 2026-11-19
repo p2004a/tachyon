@@ -52,7 +52,7 @@
 // @witness main=system_test inv=not(hitWhy("party/invite","party_in_matchmaking"))
 // @witness main=system_test inv=not(hitWhy("party/acceptInvite","joined"))
 // @witness main=system_party4 inv=not(hitWhy("party/acceptInvite","in_found_match")) steps=30 samples=40000
-// @witness main=system_test inv=not(w_acceptLeavesQueuedParty) steps=30 samples=40000
+// @witness main=system_party inv=not(w_acceptLeavesQueuedParty) steps=30 samples=40000
 // @witness main=system_test inv=not(hitWhy("party/leave","left"))
 // @witness main=system_test inv=not(hitWhy("party/leave","left_unqueued"))
 // @witness main=system_party inv=not(hitWhy("party/leave","left_declined")) steps=30 samples=20000
