@@ -22,6 +22,7 @@
 // @test main=system_test
 // @inv main=system_test inv=safety steps=30 samples=20000
 // @inv main=system_three inv=safety steps=30 samples=20000
+// @inv main=system_party inv=safety steps=30 samples=20000
 // @inv main=system_small inv=safety steps=20 samples=10000
 //
 // Witnesses: every cross-module path (check.sh expects each to be reachable).
@@ -32,11 +33,11 @@
 // @witness main=system_test inv=not(hitWhy("env/takeover","taken_over"))
 // @witness main=system_test inv=not(hitWhy("env/sessionExpired","expired"))
 // @witness main=system_test inv=not(hitWhy("system/disconnect","disconnected"))
-// @witness main=system_three inv=not(w_keptWhilePlaying) steps=30 samples=20000
-// @witness main=system_three inv=not(w_expiryWithdrawsParty) steps=30 samples=20000
+// @witness main=system_three inv=not(w_keptWhilePlaying) steps=40 samples=40000
+// @witness main=system_three inv=not(w_expiryWithdrawsParty) steps=40 samples=40000
 // @witness main=system_test inv=not(w_expiryDisbandsMatch) steps=40 samples=20000
 // @witness main=system_test inv=not(w_expiryLeavesLobby)
-// @witness main=system_test inv=not(w_expiryDropsInvite)
+// @witness main=system_test inv=not(w_expiryDropsInvite) steps=30 samples=40000
 // @witness main=system_test inv=not(w_takeoverMidReadyCheck) steps=30 samples=20000
 // @witness main=system_test inv=not(w_takeoverDropsMsgSub)
 // @witness main=system_test inv=not(w_disconnectDropsMsgSub)
@@ -49,15 +50,15 @@
 // @witness main=system_test inv=not(hitWhy("party/invite","invited"))
 // @witness main=system_test inv=not(hitWhy("party/invite","party_in_matchmaking"))
 // @witness main=system_test inv=not(hitWhy("party/acceptInvite","joined"))
-// @witness main=system_test inv=not(hitWhy("party/acceptInvite","in_found_match")) steps=30 samples=60000
-// @witness main=system_test inv=not(w_acceptLeavesQueuedParty) steps=30 samples=20000
+// @witness main=system_test inv=not(hitWhy("party/acceptInvite","in_found_match")) steps=40 samples=150000
+// @witness main=system_test inv=not(w_acceptLeavesQueuedParty) steps=30 samples=40000
 // @witness main=system_test inv=not(hitWhy("party/leave","left"))
 // @witness main=system_test inv=not(hitWhy("party/leave","left_unqueued"))
-// @witness main=system_three inv=not(hitWhy("party/leave","left_declined")) steps=30 samples=20000
-// @witness main=system_three inv=not(hitWhy("party/kickMember","kicked_unqueued")) steps=30 samples=20000
-// @witness main=system_three inv=not(hitWhy("party/kickMember","kicked_declined")) steps=30 samples=20000
-// @witness main=system_three inv=not(w_lostPartyStaysLocked) steps=30 samples=20000
-// @witness main=system_three inv=not(w_partyBattleUnlocks) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("party/leave","left_declined")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("party/kickMember","kicked_unqueued")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("party/kickMember","kicked_declined")) steps=30 samples=60000
+// @witness main=system_party inv=not(w_lostPartyStaysLocked) steps=30 samples=60000
+// @witness main=system_party inv=not(w_partyBattleUnlocks) steps=30 samples=20000
 // -- matchmaking x lobby x battle (INT-D4)
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","queued"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","party_queued"))
@@ -65,12 +66,12 @@
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","already_in_battle")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","in_lobby"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","already_queued"))
-// @witness main=system_three inv=not(hitWhy("matchmaking/queue","member_detached")) steps=30 samples=20000
+// @witness main=system_three inv=not(hitWhy("matchmaking/queue","member_detached")) steps=40 samples=40000
 // @witness main=system_test inv=not(hitWhy("matchmaking/cancel","left_queue"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/cancel","declined"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/cancel","not_queued"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/ready","readied"))
-// @witness main=system_three inv=not(hitWhy("matchmaking/ready","all_ready")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("matchmaking/ready","all_ready")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("matchmaking/ready","no_match"))
 // @witness main=system_test inv=not(hitWhy("env/match","found"))
 // @witness main=system_test inv=not(hitWhy("env/readyTimeout","lost"))
@@ -79,7 +80,7 @@
 // @witness main=system_test inv=not(hitWhy("lobby/create","in_battle")) steps=40 samples=20000
 // @witness main=system_test inv=not(hitWhy("lobby/join","joined"))
 // @witness main=system_test inv=not(hitWhy("lobby/join","queued"))
-// @witness main=system_test inv=not(hitWhy("lobby/join","in_battle")) steps=40 samples=20000
+// @witness main=system_test inv=not(hitWhy("lobby/join","in_battle")) steps=40 samples=60000
 // @witness main=system_test inv=not(hitWhy("lobby/join","invalid_lobby_id"))
 // @witness main=system_test inv=not(hitWhy("lobby/leave","left"))
 // @witness main=system_test inv=not(hitWhy("lobby/startBattle","accepted"))
@@ -87,21 +88,21 @@
 // @witness main=system_test inv=not(hitWhy("lobby/joinBattle","no_battle"))
 // -- autohost start / failure / end, lobby- and matchmaking-originated
 // @witness main=system_test inv=not(hitWhy("env/autohostStarted","lobby_started"))
-// @witness main=system_three inv=not(hitWhy("env/autohostStarted","match_started")) steps=30 samples=20000
-// @witness main=system_three inv=not(hitWhy("env/autohostStarted","killed")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("env/autohostStarted","match_started")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("env/autohostStarted","killed")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("env/autohostFailed","lobby_failed"))
-// @witness main=system_three inv=not(hitWhy("env/autohostFailed","retried")) steps=30 samples=20000
-// @witness main=system_three inv=not(hitWhy("env/startGaveUp","gave_up")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("env/autohostFailed","retried")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("env/startGaveUp","gave_up")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("env/battleEnded","ended_lobby")) steps=30 samples=20000
-// @witness main=system_three inv=not(hitWhy("env/battleEnded","ended_match")) steps=30 samples=20000
+// @witness main=system_party inv=not(hitWhy("env/battleEnded","ended_match")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("env/lobbyCrashed","crashed"))
-// @witness main=system_three inv=not(w_startingDisbanded) steps=30 samples=20000
+// @witness main=system_party inv=not(w_startingDisbanded) steps=30 samples=20000
 // @witness main=system_test inv=not(w_orphanBattle) steps=30 samples=20000
 // @witness main=system_test inv=not(w_crashOrphansBattle) steps=30 samples=20000
 // -- messaging and friend across sessions
 // @witness main=system_test inv=not(hitWhy("messaging/subscribeReceived","subscribed"))
 // @witness main=system_test inv=not(w_msgDelivered)
-// @witness main=system_test inv=not(w_msgNotToDetached)
+// @witness main=system_test inv=not(w_msgNotToDetached) steps=30 samples=40000
 // @witness main=system_test inv=not(hitWhy("messaging/send","invalid_target"))
 // @witness main=system_test inv=not(hitWhy("friend/sendRequest","requested"))
 // @witness main=system_test inv=not(hitWhy("friend/sendRequest","auto_accepted"))
@@ -156,6 +157,9 @@ module system {
   const USERS: Set[UserId]
   const MATCH_SIZE: int     // members of a found match (all queues alike)
   const MAX_PARTY: int      // party.qnt MAX_MEMBERS; < MATCH_SIZE (no party_too_big)
+  // Test knob (as lobby.qnt ENABLED): false limits the environment to the
+  // party, matchmaking and battle step groups. The semantics do not change.
+  const ALL_GROUPS: bool
 
   pure val SESSION_STEPS = Set("env/connect", "env/disconnect", "env/reconnect", "env/takeover",
                                "env/sessionExpired", "system/disconnect")
@@ -703,12 +707,20 @@ module system {
     nondet ru = pick(USERS.filter(x => inMatch(s, x) and not(s.matches.get(matchIdOf(s, x)).ready.contains(x))), u).oneOf()
     nondet du = pick(USERS.filter(x => s.presence.get(x) == Detached), u).oneOf()
     nondet kt = pick(groupOf(s, u).exclude(Set(u)), t).oneOf()
+    nondet it = pick(USERS.filter(x => isOnline(s, x) and partyIdOf(s, x) < 0 and x != u), t).oneOf()
+    nondet mt = pick(USERS.filter(x => isOnline(s, x) and inTicket(s, x) and not(groupOf(s, u).contains(x))), t).oneOf()
+    nondet jl = orNone(s.lobbies.keys().filter(x => not(s.lobbies.get(x).members.contains(u)))).oneOf()
+    nondet pu = pick(USERS.filter(x => isOnline(s, x) and playing(s, x)), u).oneOf()
+    nondet pl = orNone(s.lobbies.keys().filter(x => not(s.lobbies.get(x).members.contains(pu)))).oneOf()
     // Branches are grouped; the simulator picks a group g, then a step in it.
     // The weights serve exploration only.
-    nondet g = 0.to(6).oneOf()
+    nondet g = (if (ALL_GROUPS) 0.to(6) else Set(0, 1, 2, 4)).oneOf()
     if (g == 0) any {
       req("party/create", u, partyCreate(s, u)),
       req("party/invite", u, partyInvite(s, u, t)),
+      req("party/invite", u, partyInvite(s, u, it)),
+      req("party/invite", u, partyInvite(s, u, mt)),
+      req("party/acceptInvite", u, partyAccept(s, u, p)),
       req("party/acceptInvite", u, partyAccept(s, u, p)),
       req("party/leave", u, partyLeave(s, u)),
       req("party/kickMember", u, partyKick(s, u, t)),
@@ -725,10 +737,13 @@ module system {
       req("matchmaking/ready", ru, mmReady(s, ru)),
       apply("env/match", "", matchFound(s, ts)),
       apply("env/match", "", matchFound(s, ts)),
+      apply("env/readyTimeout", "", readyTimeout(s, rmid)),
     }
     else if (g == 3) any {
       req("lobby/create", u, lobbyCreate(s, u)),
       req("lobby/join", u, lobbyJoin(s, u, l)),
+      req("lobby/join", u, lobbyJoin(s, u, jl)),
+      req("lobby/join", pu, lobbyJoin(s, pu, pl)),
       req("lobby/leave", u, lobbyLeave(s, u)),
       req("lobby/startBattle", u, lobbyStartBattle(s, u)),
       req("lobby/joinBattle", u, lobbyJoinBattle(s, u)),
@@ -808,6 +823,11 @@ module system {
   // MSG-A9 (Tachyon silent, MSG-08): the subscription belongs to the socket.
   val msgSubSocketBound = USERS.forall(u =>
     s.msgSub.get(u) >= 0 implies (isOnline(s, u) and s.msgSub.get(u) == s.sock.get(u)))
+  // ... and only messaging/subscribeReceived on that socket subscribes it: a
+  // new socket (reconnect, takeover) starts unsubscribed (MSG-07).
+  val msgSubOnlyBySubscribe = USERS.forall(u =>
+    (s.msgSub.get(u) >= 0 and s.msgSub.get(u) != prev.msgSub.get(u)) implies
+      (lastCmd == "messaging/subscribeReceived" and lastActor == u))
   val msgOnlyToSubscribed = lastEvents.forall(e => match e._2 {
     | MsgReceived(_) => subscribedNow(s, e._1) and e._1 != lastActor
     | _ => true })
@@ -829,7 +849,7 @@ module system {
   val safety = and {
     atMostOneParty, atMostOneLobby, atMostOneTicket, atMostOneBattle, activitySlot,
     ticketsArePartyUnits, partyLockMatchesTickets, mmBattleSlot, battlesLinked, offlineIdle,
-    keptWhilePlaying, takeoverKeepsSession, msgSubSocketBound, msgOnlyToSubscribed,
+    keptWhilePlaying, takeoverKeepsSession, msgSubSocketBound, msgSubOnlyBySubscribe, msgOnlyToSubscribed,
     eventsOnlyToOnline, battleStartToParticipants, foundToMatched, cancelledReasonsInSchema,
     sessionStepsKeepFriends, denialsChangeNothing, reasonsInSchema,
   }
@@ -879,7 +899,7 @@ module system {
 // Main instance: 4 users, a match needs 3 players, parties of up to 2.
 module system_test {
   import common.* from "./common"
-  import system(USERS = Set("a", "b", "c", "d"), MATCH_SIZE = 3, MAX_PARTY = 2).*
+  import system(USERS = Set("a", "b", "c", "d"), MATCH_SIZE = 3, MAX_PARTY = 2, ALL_GROUPS = true).*
 
   // Session lifecycle across party, lobby and matchmaking (INT-D1, SESSION-08).
   run sessionLifecycleTest =
@@ -939,6 +959,10 @@ module system_test {
       .then(apply("matchmaking/queue", "c", mmQueue(s, "c")))
       .then(apply("env/match", "", matchFound(s, Set(Set("a", "b"), Set("c")))))
       .expect(and { lastWhy == "found", s.parties.get(0).queued })                // still locked
+      .then(apply("party/create", "d", partyCreate(s, "d")))
+      .then(apply("party/invite", "d", partyInvite(s, "d", "a")))                 // a may be invited (PARTY-09)
+      .then(apply("party/acceptInvite", "a", partyAccept(s, "a", 3)))
+      .expect(lastReply == Failed("invalid_request") and lastWhy == "in_found_match")   // INT-06
       .then(apply("matchmaking/ready", "a", mmReady(s, "a")))
       .then(apply("env/takeover", "a", takeover(s, "a")))                         // INT-08
       .expect(s.matches.get(2).ready == Set("a"))
@@ -946,12 +970,12 @@ module system_test {
       .expect(lastWhy == "already_ready")
       .then(apply("matchmaking/ready", "b", mmReady(s, "b")))
       .then(apply("matchmaking/ready", "c", mmReady(s, "c")))
-      .expect(and { lastWhy == "all_ready", s.matches.get(2).phase == Starting(3) })
-      .then(apply("env/autohostFailed", "", autohostFailed(s, 3)))
-      .expect(and { lastWhy == "retried", s.matches.get(2).phase == Starting(4), not(3.in(s.battles.keys())) })
-      .then(apply("env/autohostStarted", "", autohostStarted(s, 4)))
+      .expect(and { lastWhy == "all_ready", s.matches.get(2).phase == Starting(4) })
+      .then(apply("env/autohostFailed", "", autohostFailed(s, 4)))
+      .expect(and { lastWhy == "retried", s.matches.get(2).phase == Starting(5), not(4.in(s.battles.keys())) })
+      .then(apply("env/autohostStarted", "", autohostStarted(s, 5)))
       .expect(and { lastWhy == "match_started", not(s.parties.get(0).queued),
-                    lastEvents == Set(("a", BattleStart(4)), ("b", BattleStart(4)), ("c", BattleStart(4))) })
+                    lastEvents == Set(("a", BattleStart(5)), ("b", BattleStart(5)), ("c", BattleStart(5))) })
       .then(apply("lobby/create", "c", lobbyCreate(s, "c")))
       .expect(lastWhy == "in_battle")                                              // INT-D4
       .then(apply("matchmaking/queue", "a", mmQueue(s, "a")))
@@ -959,8 +983,8 @@ module system_test {
       .then(apply("env/disconnect", "c", socketDrop(s, "c")))
       .then(apply("env/sessionExpired", "c", sessionExpired(s, "c")))
       .expect(lastWhy == "kept_while_playing" and s == prev)                     // INT-D2
-      .then(apply("env/battleEnded", "", battleEnded(s, 4)))
-      .expect(lastEvents == Set(("a", BattleEnded(4)), ("b", BattleEnded(4))))
+      .then(apply("env/battleEnded", "", battleEnded(s, 5)))
+      .expect(lastEvents == Set(("a", BattleEnded(5)), ("b", BattleEnded(5))))
       .then(apply("env/sessionExpired", "c", sessionExpired(s, "c")))            // INT-02: grace runs again
       .expect(lastWhy == "expired")
 
@@ -1067,11 +1091,18 @@ module system_test {
 // Small instance for bounded model checking: 3 users, matches of 2.
 module system_small {
   import common.* from "./common"
-  import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 2, MAX_PARTY = 1).*
+  import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 2, MAX_PARTY = 1, ALL_GROUPS = true).*
 }
 
 // Deep matchmaking paths: 3 users, so every match takes all of them.
 module system_three {
   import common.* from "./common"
-  import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 3, MAX_PARTY = 2).*
+  import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 3, MAX_PARTY = 2, ALL_GROUPS = true).*
+}
+
+// Party x matchmaking x battle only (no lobby, session or messaging steps),
+// for the deepest party paths.
+module system_party {
+  import common.* from "./common"
+  import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 3, MAX_PARTY = 2, ALL_GROUPS = false).*
 }
