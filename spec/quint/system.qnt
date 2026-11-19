@@ -23,6 +23,7 @@
 // @inv main=system_test inv=safety steps=30 samples=20000
 // @inv main=system_three inv=safety steps=30 samples=20000
 // @inv main=system_party inv=safety steps=30 samples=20000
+// @inv main=system_party4 inv=safety steps=30 samples=10000
 // @inv main=system_small inv=safety steps=20 samples=10000
 //
 // Witnesses: every cross-module path (check.sh expects each to be reachable).
@@ -34,7 +35,7 @@
 // @witness main=system_test inv=not(hitWhy("env/sessionExpired","expired"))
 // @witness main=system_test inv=not(hitWhy("system/disconnect","disconnected"))
 // @witness main=system_three inv=not(w_keptWhilePlaying) steps=40 samples=40000
-// @witness main=system_three inv=not(w_expiryWithdrawsParty) steps=40 samples=40000
+// @witness main=system_three inv=not(w_expiryWithdrawsParty) steps=40 samples=80000
 // @witness main=system_test inv=not(w_expiryDisbandsMatch) steps=40 samples=20000
 // @witness main=system_test inv=not(w_expiryLeavesLobby)
 // @witness main=system_test inv=not(w_expiryDropsInvite) steps=30 samples=40000
@@ -50,7 +51,7 @@
 // @witness main=system_test inv=not(hitWhy("party/invite","invited"))
 // @witness main=system_test inv=not(hitWhy("party/invite","party_in_matchmaking"))
 // @witness main=system_test inv=not(hitWhy("party/acceptInvite","joined"))
-// @witness main=system_test inv=not(hitWhy("party/acceptInvite","in_found_match")) steps=40 samples=150000
+// @witness main=system_party4 inv=not(hitWhy("party/acceptInvite","in_found_match")) steps=30 samples=40000
 // @witness main=system_test inv=not(w_acceptLeavesQueuedParty) steps=30 samples=40000
 // @witness main=system_test inv=not(hitWhy("party/leave","left"))
 // @witness main=system_test inv=not(hitWhy("party/leave","left_unqueued"))
@@ -61,7 +62,7 @@
 // @witness main=system_party inv=not(w_partyBattleUnlocks) steps=30 samples=20000
 // -- matchmaking x lobby x battle (INT-D4)
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","queued"))
-// @witness main=system_test inv=not(hitWhy("matchmaking/queue","party_queued"))
+// @witness main=system_test inv=not(hitWhy("matchmaking/queue","party_queued")) steps=30 samples=40000
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","replaced"))
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","already_in_battle")) steps=30 samples=20000
 // @witness main=system_test inv=not(hitWhy("matchmaking/queue","in_lobby"))
@@ -80,7 +81,7 @@
 // @witness main=system_test inv=not(hitWhy("lobby/create","in_battle")) steps=40 samples=20000
 // @witness main=system_test inv=not(hitWhy("lobby/join","joined"))
 // @witness main=system_test inv=not(hitWhy("lobby/join","queued"))
-// @witness main=system_test inv=not(hitWhy("lobby/join","in_battle")) steps=40 samples=60000
+// @witness main=system_test inv=not(hitWhy("lobby/join","in_battle")) steps=40 samples=150000
 // @witness main=system_test inv=not(hitWhy("lobby/join","invalid_lobby_id"))
 // @witness main=system_test inv=not(hitWhy("lobby/leave","left"))
 // @witness main=system_test inv=not(hitWhy("lobby/startBattle","accepted"))
@@ -1105,4 +1106,10 @@ module system_three {
 module system_party {
   import common.* from "./common"
   import system(USERS = Set("a", "b", "c"), MATCH_SIZE = 3, MAX_PARTY = 2, ALL_GROUPS = false).*
+}
+
+// As system_party with a fourth user, who can invite a user in a found match.
+module system_party4 {
+  import common.* from "./common"
+  import system(USERS = Set("a", "b", "c", "d"), MATCH_SIZE = 3, MAX_PARTY = 2, ALL_GROUPS = false).*
 }

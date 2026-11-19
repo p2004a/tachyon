@@ -34,11 +34,13 @@ convention.
 **Instances:**
 - `system_test`: 4 users, `MATCH_SIZE=3`, `MAX_PARTY=2`. Five reviewed transcripts and most witnesses.
 - `system_three`: 3 users, so every match takes all of them. Used for the deep matchmaking/battle witnesses.
+- `system_party`: 3 users as `system_three`, with `ALL_GROUPS = false`, so only the party, matchmaking and battle step groups run (a test knob like lobby.qnt `ENABLED`). Used for the deepest party paths.
+- `system_party4`: the same knob with 4 users, so a fourth user can invite someone in a found match.
 - `system_small`: 3 users, matches of 2, parties of 1. Used for Apalache.
 
 **Results:**
-- `./check.sh system.qnt`: 1 typecheck, 1 test (5 runs), 3 invariant runs and 76 witnesses, all ok.
-- `quint verify --main=system_small --invariant=safety --max-steps=2` with `JVM_ARGS=-Xmx6G`: no violation, about 9.5 min (558 s for the first version of the step, see "Apalache").
+- `./check.sh system.qnt`: 1 typecheck, 1 test (5 runs), 5 invariant runs and 76 witnesses (see "Integration run").
+- `quint verify --main=system_small --invariant=safety --max-steps=2` with `JVM_ARGS=-Xmx6G`: no violation (see "Apalache" for which version of `step` was checked).
 
 ## Orchestrator decisions
 
@@ -240,8 +242,8 @@ convention.
 
 ## Coverage
 
-All witnesses are `@witness` directives in system.qnt. Witnesses marked "(three)" run on `system_three` with
-40 steps / 40000 samples; the others run on `system_test`.
+All witnesses are `@witness` directives in system.qnt. Witnesses marked "(three)" run on `system_three` or `system_party`, with the bounds in each directive. The
+others run on `system_test`. Some deep witnesses need 60000-150000 samples; the directives say so.
 
 | Step | Outcome (why) | Status |
 |---|---|---|
@@ -253,7 +255,7 @@ All witnesses are `@witness` directives in system.qnt. Witnesses marked "(three)
 | system/disconnect | Ok; while playing; Offline in battle | witnessed; `w_systemDisconnectWhilePlaying`, `w_offlineInBattle` |
 | party/create | created; solo_cancelled; in_found_match | witnessed. `already_in_party` is party-internal (party.qnt) |
 | party/invite | invited; party_in_matchmaking | witnessed. not_in_party, target_not_connected, already_member_or_invited, party_full: party-internal (party.qnt); party_full in `partyMatchTest` |
-| party/acceptInvite | joined; in_found_match; leaves locked party | witnessed (`w_acceptLeavesQueuedParty`; in_found_match needs 40 steps / 150000 samples and is also in `partyMatchTest`). not_invited: party-internal |
+| party/acceptInvite | joined; in_found_match; leaves locked party | witnessed (`w_acceptLeavesQueuedParty`; in_found_match on `system_party4`, also in `partyMatchTest`). not_invited: party-internal |
 | party/leave | left; left_unqueued; left_declined (three) | witnessed |
 | party/kickMember | kicked_unqueued (three); kicked_declined (three) | witnessed. plain `kicked`, kick_self, target_not_member: party-internal (party.qnt) |
 | matchmaking/queue | queued; party_queued; replaced; already_in_battle; in_lobby; already_queued; member_detached (three) | witnessed |
@@ -275,7 +277,7 @@ All witnesses are `@witness` directives in system.qnt. Witnesses marked "(three)
 | messaging/send | delivered; not to Detached; invalid_target | witnessed (`w_msgDelivered`, `w_msgNotToDetached`) |
 | friend/sendRequest | requested; auto_accepted; event lost to a non-Online peer | witnessed (`w_friendEventLost`). invalid_user / already_in_friendlist: friend-internal |
 
-Invariants (`safety`, run on `system_test` 20000×30, `system_three` 20000×30, `system_small` 10000×20):
+Invariants (`safety`, run on `system_test` 20000×30, `system_three` 20000×30, `system_party` 20000×30, `system_party4` 10000×30, `system_small` 10000×20):
 - `atMostOneParty`, `atMostOneLobby`, `atMostOneTicket`, `atMostOneBattle`.
 - `activitySlot` (INT-D4).
 - `ticketsArePartyUnits`.
@@ -303,10 +305,29 @@ Each mutation was a single edit, run on a copy of system.qnt in the scratchpad (
 
 ## Apalache
 
-- `JVM_ARGS=-Xmx6G quint verify --main=system_small --invariant=safety --max-steps=2 system.qnt`: `[ok] No violation found`. That was 557 s on the first version of `step`. The final version is listed under "Integration run" below.
-- `--max-steps=3` was not attempted: other agents share the machine, and depth 2 already takes about 9 minutes.
-- Depth ≥ 3 is covered only by simulation and the transcripts.
+`JVM_ARGS=-Xmx6G quint verify --main=system_small --invariant=safety --max-steps=2 system.qnt` gave `[ok] No violation found` on three successive versions of `step`, in 557 s, 1199 s and 2127 s (the last on a loaded machine).
+
+After that, the exploration weighting changed again. These edits did not touch any command, environment-step definition or invariant:
+- the `ALL_GROUPS` knob;
+- `env/readyTimeout` added to the matchmaking group;
+- a lobby/join branch for a playing user.
+
+The final file was not re-verified: one run takes about 35 minutes. The `@verify` directive stays, for `VERIFY=1` runs.
+
+`--max-steps=3` was not attempted: other agents share the machine, and depth 2 already takes 9 to 35 minutes. Depth ≥ 3 is covered only by simulation and the transcripts.
 
 ## Integration run
+
+Last full `./check.sh system.qnt`: 81 ok lines, 1 witness failure. That witness was `party/acceptInvite` in_found_match, which needs about 7000-50000 traces on `system_test`. It was moved to `system_party4` and re-run on its own, together with the new `system_party4` safety run: both ok. So all 82 directives have passed, but not in a single full run.
+
+Several deep witnesses need tens of thousands of traces. Their directives carry explicit bounds, set at about 3× the trace counts measured with fixed seeds. A random-seed run can still miss one now and then.
+
+`./check.sh` for the other modules, after the integration edits:
+- lobby: 84 ok
+- party: 41 ok
+- matchmaking: 38 ok
+- session: 24 ok
+- friend: 31 ok
+- final runs of lobby, friend, party_invites, common, schema, party, matchmaking, session, messaging and autohost: all green.
 
 Integration changes in the other modules are listed under "Integration changes" in findings/lobby.md, party.md, matchmaking.md, session.md, messaging.md, friend.md and autohost.md.
