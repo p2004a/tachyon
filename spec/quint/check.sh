@@ -5,12 +5,16 @@
 #   // @inv  main=<module> inv=<expr> [steps=N] [samples=N]   -> quint run, must hold
 #   // @witness main=<module> inv=<expr> [steps=N] [samples=N] -> quint run, must be VIOLATED
 #   // @verify main=<module> inv=<expr> steps=N  -> quint verify (Apalache); only with VERIFY=1
-# Usage: ./check.sh [file.qnt ...]
+# Usage: [SEED=n] [VERIFY=1] ./check.sh [file.qnt ...]   (SEED defaults to 1)
 set -uo pipefail
 cd "$(dirname "$0")"
 files=("$@"); [ ${#files[@]} -eq 0 ] && files=(*.qnt)
 fail=0
-kv() { sed -n "s/.*\b$1=\([^ ]*\).*/\1/p" <<<"$2"; }
+SEED=${SEED:-1}
+tmp=$(mktemp "${TMPDIR:-/tmp}/qc.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+# value of key=... in a directive line; portable sed (no \b)
+kv() { sed -n "s/^.*[[:space:]]$1=\([^[:space:]]*\).*$/\1/p" <<<"$2"; }
 for f in "${files[@]}"; do
   quint typecheck "$f" >/dev/null 2>&1 || { echo "FAIL typecheck $f"; quint typecheck "$f" 2>&1 | head -20; fail=1; continue; }
   echo "ok   typecheck $f"
@@ -21,17 +25,16 @@ for f in "${files[@]}"; do
     samples=$(kv samples "$line"); samples=${samples:-10000}
     case "$kind" in
       test)
-        if quint test --main="$main" "$f" >/tmp/qc.$$ 2>&1; then echo "ok   test $f:$main"; else echo "FAIL test $f:$main"; tail -30 /tmp/qc.$$; fail=1; fi ;;
+        if quint test --main="$main" --max-samples=10000 --seed="$SEED" "$f" >"$tmp" 2>&1; then echo "ok   test $f:$main"; else echo "FAIL test $f:$main"; tail -30 "$tmp"; fail=1; fi ;;
       inv)
-        if quint run --main="$main" --invariant="$inv" --max-steps="$steps" --max-samples="$samples" "$f" >/tmp/qc.$$ 2>&1; then echo "ok   inv $f:$main $inv"; else echo "FAIL inv $f:$main $inv"; tail -40 /tmp/qc.$$; fail=1; fi ;;
+        if quint run --main="$main" --invariant="$inv" --max-steps="$steps" --max-samples="$samples" --seed="$SEED" "$f" >"$tmp" 2>&1; then echo "ok   inv $f:$main $inv"; else echo "FAIL inv $f:$main $inv"; tail -40 "$tmp"; fail=1; fi ;;
       witness)
-        if quint run --main="$main" --invariant="$inv" --max-steps="$steps" --max-samples="$samples" "$f" >/tmp/qc.$$ 2>&1; then echo "FAIL witness not reached $f:$main $inv"; fail=1; else
-          if grep -q "Invariant violated" /tmp/qc.$$; then echo "ok   witness $f:$main $inv"; else echo "FAIL witness error $f:$main"; tail -20 /tmp/qc.$$; fail=1; fi; fi ;;
+        if quint run --main="$main" --invariant="$inv" --max-steps="$steps" --max-samples="$samples" --seed="$SEED" "$f" >"$tmp" 2>&1; then echo "FAIL witness not reached $f:$main $inv"; fail=1; else
+          if grep -q "Invariant violated" "$tmp"; then echo "ok   witness $f:$main $inv"; else echo "FAIL witness error $f:$main"; tail -20 "$tmp"; fail=1; fi; fi ;;
       verify)
         [ "${VERIFY:-0}" = 1 ] || continue
-        if quint verify --main="$main" --invariant="$inv" --max-steps="$steps" "$f" >/tmp/qc.$$ 2>&1; then echo "ok   verify $f:$main $inv"; else echo "FAIL verify $f:$main $inv"; tail -30 /tmp/qc.$$; fail=1; fi ;;
+        if quint verify --main="$main" --invariant="$inv" --max-steps="$steps" "$f" >"$tmp" 2>&1; then echo "ok   verify $f:$main $inv"; else echo "FAIL verify $f:$main $inv"; tail -30 "$tmp"; fail=1; fi ;;
     esac
-  done < <(grep -E '^\s*// @(test|inv|witness|verify) ' "$f")
+  done < <(grep -E '^[[:space:]]*// @(test|inv|witness|verify) ' "$f")
 done
-rm -f /tmp/qc.$$
 exit $fail

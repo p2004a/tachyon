@@ -161,7 +161,7 @@ module session {
   // authorization.md: "To access the Tachyon WebSocket endpoint, the client has
   // to acquire the access token for the custom scope `tachyon.lobby`."
   // user.md (self): "This event should be sent to a user when they login."
-  // Design default: one live session per user, a new connection replaces the
+  // PD-01: one live session per user, a new connection replaces the
   // old one (ASSUMPTION SESSION-01); after reconnect the server sends full
   // state following user/self (ASSUMPTION SESSION-05: for this group, that is
   // a full user/updated for every subscribed user).
@@ -199,7 +199,7 @@ module session {
     if (not(attached(s, u))) noop(s) else openSocket(s, u)
 
   // The socket closes without system/disconnect (network loss, crash, server
-  // closing it with 1008). Design default: the session lasts through a grace
+  // closing it with 1008). PD-02: the session lasts through a grace
   // period. ASSUMPTION SESSION-04: no status change, so no user/updated.
   // Same step as party.qnt `disconnect` (Online -> Detached).
   pure def socketDrop(s: State, u: UserId): Outcome =

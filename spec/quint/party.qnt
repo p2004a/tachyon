@@ -5,7 +5,6 @@
 // takeover, session grace expiry, fresh connect), the party crashing, and the matchmaking module
 // putting a party in / taking it out of a queue.
 // Source: tachyon docs/schema/party.md (generated from src/schema/party/*.ts).
-// Grown from party_invites.qnt (the reference slice, kept unchanged).
 // Findings: findings/party.md (PARTY-nn ids below).
 //
 // @test main=party3
@@ -57,7 +56,7 @@ module party {
 
   // Session presence (owned by the user/system groups; modelled here because
   // the party rules depend on it). Detached = socket dropped, session still in
-  // its grace period. ASSUMPTION PARTY-A1 (design default): party membership
+  // its grace period. ASSUMPTION PARTY-A1 (PD-02): party membership
   // and invites belong to the session, not the socket.
   type Presence = Online | Detached | Offline
 

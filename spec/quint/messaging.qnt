@@ -44,7 +44,7 @@ module messaging {
   type Msg = { id: MsgId, src: Source, from: UserId, body: int }
   type Event = Received(Msg)
 
-  // A session outlives its socket for a grace period (design default).
+  // A session outlives its socket for a grace period (PD-02).
   // dropped: the buffer has overflowed at least once (ghost, for witnesses).
   type Session = { connected: bool, subscribed: bool, buffer: List[MsgId], dropped: bool }
 
@@ -193,7 +193,7 @@ module messaging {
     else { ...none(s), state: { ...s, sessions: s.sessions.set(u,
              { ...sess(s, u), connected: true, subscribed: false }) } }
 
-  // A second connection replaces the attached one (design default "a new
+  // A second connection replaces the attached one (PD-01 "a new
   // connection replaces the old one"; session.qnt env/takeover). Same rule as
   // reconnect: the new socket starts unsubscribed (MSG-A9; teiserver keeps the
   // old subscription, MSG-07).

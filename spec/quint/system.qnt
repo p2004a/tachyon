@@ -4,7 +4,7 @@
 // here is a refinement-by-convention of the definitions it cites as
 // `<module>.<definition>`, and system.md (INT-nn) lists every place where the
 // composition had to choose because the modules or Tachyon disagree or are
-// silent. Decisions INT-D1..D5 are the orchestrator's (findings/system.md).
+// silent. Decisions INT-D1..D5 and their reasons are in findings/system.md.
 //
 // Abstract state per group:
 //  - session (session.qnt): presence Online | Detached | Offline (INT-D1), a

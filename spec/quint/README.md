@@ -11,8 +11,9 @@ evaluator v0.7.1, Apalache 0.62.4 for `quint verify`.
 ```
 ./check.sh                # typecheck, transcripts, invariants, witnesses for all files
 ./check.sh lobby.qnt      # one file
-VERIFY=1 ./check.sh x.qnt # also bounded model checking (slow)
-python3 tools/gen_schema_reasons.py > schema.qnt   # from repo root's spec/quint/.. paths; see script
+SEED=7 ./check.sh x.qnt   # another simulation seed (default 1)
+VERIFY=1 ./check.sh x.qnt # also bounded model checking (slow, shallow; see below)
+python3 tools/gen_schema_reasons.py > schema.qnt   # regenerate from ../../schema/
 ```
 
 ## Files
@@ -21,9 +22,46 @@ python3 tools/gen_schema_reasons.py > schema.qnt   # from repo root's spec/quint
 |---|---|
 | `schema.qnt` | GENERATED from `schema/`: failure reasons, request/event sets, direction per command |
 | `common.qnt` | `UserId`, `Reply`, `send`, `theOne`, `mapRemove`, `replyInSchema` |
-| `party_invites.qnt` | original 166-line example (kept unchanged as the reference slice) |
-| `<group>.qnt` | one per command group |
+| `<group>.qnt` | one per command group: party, lobby, matchmaking, autohost, session, messaging, friend, clan |
+| `system.qnt` | composition of all groups except clan over shared users |
 | `findings/<group>.md` | gaps, contradictions, divergences and assumptions found while writing the module |
+| `findings/system.md` | cross-group decisions (INT-D1..D5) and findings (INT-01..11) |
+| `findings/REVIEW.md` | independent review of every implementation-divergence entry |
+
+## What the checks cover
+
+- `@test`: `quint test` transcripts, hand-written sequences with exact expected replies and events.
+- `@inv`: `quint run` random simulation, up to 30 steps and 20000 samples per instance, seeded with
+  `SEED` (default 1) so runs are reproducible. This is the main safety coverage.
+- `@witness`: the same simulation must *violate* `not(X)`, proving that state X is reachable, so the
+  invariants are not vacuous.
+- `@verify` (`VERIFY=1` only): Apalache bounded model checking. It is a shallow sanity check, not the
+  safety argument. Only small instances fit in memory, at `steps=2` (lobby does not fit at all). In
+  particular `system_small` has `MAX_PARTY=1`, so it cannot reach two-player parties, found matches or
+  running battles. Coverage of those states comes from the transcripts and the simulation above.
+
+Implementation behaviour (teiserver, bar-lobby) is not executed. Divergences are read from the code at
+teiserver `b36429f` and bar-lobby `ee58acd`.
+
+## Proposed protocol defaults (not yet in Tachyon)
+
+Where Tachyon is silent the models need some rule. The rules below are proposals; none of them is stated in
+`docs/` or `schema/`. Findings that compare an implementation against one of them are recorded as `Gap` /
+`Proposed default`, not as a divergence. Each needs a decision from the protocol owners.
+
+| ID | Proposed default | Used by |
+|---|---|---|
+| PD-01 | One live session per user. A new connection replaces the old one (takeover); the session survives. | session, messaging, system (INT-D1) |
+| PD-02 | Session grace period. A dropped socket leaves the session detached; party and queue membership last until grace expires; a detached member fails the ready check; presence turns `offline` only at expiry. | session, party, matchmaking, system |
+| PD-03 | Activity slot. A user is in at most one of lobby, matchmaking ticket, matchmaking battle. Queueing from a lobby fails with `invalid_request`. | lobby, matchmaking, system (INT-D4) |
+| PD-04 | A lobby holds at most 256 members, players and spectators together (a small constant in the model). | lobby |
+| PD-05 | `matchmaking/queue` from a searching user replaces the ticket; after a match is found it fails with `already_queued`. Resolves MM-01. | matchmaking |
+| PD-06 | Mutual friend requests: the second request accepts the first. | friend |
+| PD-07 | Party invite timeout, party `maxMembers` and friend capacities are server settings. | party, friend |
+| PD-08 | After a reconnect the server sends full state following `user/self`. | session, lobby, friend |
+| PD-09 | A retried `autohost/start` answered with `battle_already_exists` is treated as unknown: kill the battle and fail the start; matchmaking retries on another autohost. | autohost, system |
+| PD-10 | Battles survive an autohost disconnect for an autohost grace period, then are closed as lost and the players' activity slots are freed. | autohost, system |
+| PD-11 | Battle result: one result by majority of per-player finished reports, else no result. | autohost |
 
 ## Conventions (all modules)
 
@@ -35,7 +73,7 @@ python3 tools/gen_schema_reasons.py > schema.qnt   # from repo root's spec/quint
    `{ state, reply: Reply, events: Set[(UserId, Event)] }`. Each definition
    quotes the Tachyon sentence it implements (`docs/schema/<group>.md` or the
    schema `description`), or is tagged `// ASSUMPTION <ID>` pointing to a
-   findings entry.
+   findings entry or a `PD-nn` above.
 3. **Denials** are ordinary outcomes: state unchanged, no events,
    `Failed(reason)`. The reason must be in that command's schema enum;
    every module states `val reasonsInSchema = replyInSchema(lastCmd, lastReply)`
@@ -49,9 +87,9 @@ python3 tools/gen_schema_reasons.py > schema.qnt   # from repo root's spec/quint
    becomes boss, which match) is a `nondet` in `step`; the implementation's
    choice must be one of the allowed picks.
 6. **State machine.** Vars `s`, `lastCmd: str`, `lastReply: Reply`,
-   `lastEvents`, plus any module-specific ones. `action apply(cmd, o)` as in
-   the example. `lastCmd` uses the Tachyon command id (`lobby/join`) for
-   requests and `env/<name>` for environment steps.
+   `lastEvents`, plus any module-specific ones. `action apply(cmd, o)`.
+   `lastCmd` uses the Tachyon command id (`lobby/join`) for requests and
+   `env/<name>` for environment steps.
 7. **Properties.** `val safety = and { ... }` with every invariant, and at
    least one reachability witness per command success and per denial reason
    that can happen (`// @witness`), or a comment saying why it is
@@ -68,15 +106,17 @@ python3 tools/gen_schema_reasons.py > schema.qnt   # from repo root's spec/quint
 9. **Seeded spec bugs.** For each module, at least three single-line
    mutations that `check.sh` must catch, listed in the findings file with what
    caught them. Do not leave mutations in the file.
-10. Do not edit `schema.qnt`, `common.qnt`, `check.sh` or another group's
-    files. Needs there go in your findings file under "Requests to the
-    orchestrator".
+10. `schema.qnt` is generated; change `schema/` and regenerate instead of
+    editing it.
 
 ## Findings format (`findings/<group>.md`)
 
+Each file has two parts: **Protocol (Tachyon)** findings and **Implementation** findings
+(teiserver `b36429f`, bar-lobby `ee58acd`).
+
 ```
 ### <GROUP>-<nn>: <one-line title>
-- Kind: Gap | Contradiction | Divergence-teiserver | Divergence-bar-lobby | Assumption
+- Kind: Gap | Contradiction | Proposed default | Assumption | Divergence-teiserver | Divergence-bar-lobby
 - Evidence: path:line references with short verbatim quotes (tachyon docs/schema,
   teiserver lib/, bar-lobby src/)
 - Spec choice: what the model does, and the definition name
@@ -84,6 +124,7 @@ python3 tools/gen_schema_reasons.py > schema.qnt   # from repo root's spec/quint
 ```
 
 Gap = the protocol is silent. Contradiction = two parts of Tachyon disagree.
-Divergence = an implementation behaves differently from the spec (cite
-code). Assumption = a choice made in the spec that is not stated anywhere and
-should be confirmed.
+Proposed default = the protocol is silent and the model uses a `PD-nn` rule above; an implementation that
+differs from it is noted, not counted as a divergence. Assumption = a modelling choice not stated anywhere.
+Divergence = an implementation behaves differently from Tachyon text (cite code). Entries refuted by
+`REVIEW.md` stay, marked `Refuted`, with the reason.

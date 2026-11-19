@@ -125,7 +125,7 @@ module friend {
     else if (friendsOf(s, u).contains(t)) deny(s, "already_in_friendlist")
     // ASSUMPTION FRIEND-06: a repeated request has no schema reason -> invalid_request.
     else if (s.requests.contains((u, t))) deny(s, "invalid_request")
-    // ASSUMPTION FRIEND-07 (design default): "the second request accepts the
+    // ASSUMPTION FRIEND-07 (PD-06): "the second request accepts the
     // first". Both users get requestAccepted, because the caller's Ok alone
     // does not say that a friendship (not a request) was created. No capacity
     // check: the step removes a pending request and adds no new one.
@@ -174,7 +174,7 @@ module friend {
   // Friend state is persistent: no session step changes friends or requests.
   // On env/connect and env/reconnect the client gets user/self (privateUser:
   // friendIds, outgoingFriendRequest, incomingFriendRequest) and rebuilds its
-  // view from it (design default: "after reconnect the server sends full state
+  // view from it (PD-08: "after reconnect the server sends full state
   // following user/self"; teiserver tachyon_handler.ex:101).
   pure def setPresence(s: State, u: UserId, from: Presence, p: Presence): Outcome =
     if (s.presence.get(u) != from) { state: s, reply: NoReply, events: Set() }   // late/repeated: no-op

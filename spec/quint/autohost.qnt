@@ -86,7 +86,7 @@ module autohost {
   type HostId = str
   type BattleId = int
 
-  // Server-side battle phases (design doc): PStarting = autohost/start sent, no
+  // Server-side battle phases (PD-09, PD-10): PStarting = autohost/start sent, no
   // success yet; PRunning = autohost/start succeeded; PEnded = engine_quit/crash
   // received; Failed = the start was given up; PLost = the autohost stayed
   // away longer than the grace period.
