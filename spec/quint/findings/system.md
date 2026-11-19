@@ -38,9 +38,9 @@ convention.
 - `system_party4`: the same knob with 4 users, so a fourth user can invite someone in a found match.
 - `system_small`: 3 users, matches of 2, parties of 1. Used for Apalache.
 
-**Results:**
-- `./check.sh system.qnt`: 1 typecheck, 1 test (5 runs), 5 invariant runs and 76 witnesses (see "Integration run").
-- `quint verify --main=system_small --invariant=safety --max-steps=2` with `JVM_ARGS=-Xmx6G`: no violation (see "Apalache" for which version of `step` was checked).
+**Results** (`./check.sh`, `SEED=1`, at commit `eb48d7d`; later commits change only Markdown):
+- `system.qnt`: 83 of 83 ok in one run: 1 typecheck, 1 test (5 runs), 5 invariant runs, 76 witnesses. See "Check run".
+- `quint verify --main=system_small --invariant=safety --max-steps=2`: no violation, on an earlier version of `step`. This is a shallow sanity check only; see "Apalache".
 
 ## Composition decisions
 
@@ -321,29 +321,27 @@ Each mutation was a single edit, run on a scratch copy of system.qnt (`quint tes
 
 ### Apalache
 
-`JVM_ARGS=-Xmx6G quint verify --main=system_small --invariant=safety --max-steps=2 system.qnt` gave `[ok] No violation found` on three successive versions of `step`, in 557 s, 1199 s and 2127 s (the last on a loaded machine).
+`JVM_ARGS=-Xmx6G quint verify --main=system_small --invariant=safety --max-steps=2 system.qnt` gave `[ok] No violation found` on three successive versions of `step`, in 557 s, 1199 s and 2127 s (the last on a loaded machine). The final `step` was not re-verified (about 35 minutes per run); the later edits changed only the exploration weighting (`ALL_GROUPS`, `env/readyTimeout` in the matchmaking group, a lobby/join branch for a playing user), not any command, environment step or invariant.
 
-After that, the exploration weighting changed again. These edits did not touch any command, environment-step definition or invariant:
-- the `ALL_GROUPS` knob;
-- `env/readyTimeout` added to the matchmaking group;
-- a lobby/join branch for a playing user.
+This is a shallow sanity check, not the safety argument. At depth 2 only two steps run from the initial state, and `system_small` has `MAX_PARTY = 1`, so it cannot reach two-player parties, found matches or running battles. Depth 3 was not attempted. Safety coverage for those states comes from the `quint test` transcripts and the `quint run` simulation below.
 
-The final file was not re-verified: one run takes about 35 minutes. The `@verify` directive stays, for `VERIFY=1` runs.
+### Check run
 
-`--max-steps=3` was not attempted: the machine is shared, and depth 2 already takes 9 to 35 minutes. Depth ≥ 3 is covered only by simulation and the transcripts.
+One full `./check.sh` over every file with the default `SEED=1` (commit `eb48d7d`, 60 min 24 s): 423 ok, 0 FAIL.
 
-### Integration run
+| File | ok |
+|---|---|
+| system | 83 |
+| lobby | 84 |
+| autohost | 59 |
+| party | 41 |
+| clan | 41 |
+| matchmaking | 38 |
+| friend | 31 |
+| session | 24 |
+| messaging | 20 |
+| common, schema | 1 each (typecheck) |
 
-Last full `./check.sh system.qnt`: 81 ok lines, 1 witness failure. That witness was `party/acceptInvite` in_found_match, which needs about 7000-50000 traces on `system_test`. It was moved to `system_party4` and re-run on its own, together with the new `system_party4` safety run: both ok. So all 82 directives have passed, but not in a single full run.
-
-Several deep witnesses need tens of thousands of traces. Their directives carry explicit bounds, set at about 3× the trace counts measured with fixed seeds. A random-seed run can still miss one now and then.
-
-`./check.sh` for the other modules, after the integration edits:
-- lobby: 84 ok
-- party: 41 ok
-- matchmaking: 38 ok
-- session: 24 ok
-- friend: 31 ok
-- final runs of lobby, friend, common, schema, party, matchmaking, session, messaging and autohost: all green.
+Deep witnesses need tens of thousands of traces; their directives carry explicit bounds. With a fixed seed the run is reproducible. Another seed (`SEED=n ./check.sh`) can miss a witness near its bound; that is a sampling miss, not a property violation.
 
 Integration changes in the other modules are listed under "Integration changes" (Model notes) in findings/lobby.md, party.md, matchmaking.md, session.md, messaging.md, friend.md and autohost.md.
