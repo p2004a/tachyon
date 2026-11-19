@@ -31,7 +31,7 @@ Check result: `./check.sh matchmaking.qnt` reports 38 ok and 0 FAIL in two conse
 core branches (queue, ready, match) several times, which weights only the random exploration. `quint verify --max-steps=2` → no violation (about 190 s,
 `JVM_ARGS=-Xmx6G`).
 
-## Findings
+## Protocol (Tachyon)
 
 ### MM-01: `queue` "should cancel the previous queue" contradicts the `already_queued` reason
 - Kind: Contradiction
@@ -39,7 +39,7 @@ core branches (queue, ready, match) several times, which weights only the random
   in one." The same schema lists `{ status: "failed", reason: "already_queued" }` (`queue.ts:37`). Nothing says when
   `already_queued` applies. If a new request always replaces the old one, the reason can never occur. user/self also
   has a third state, `found` (`definitions/privateUser.ts:20-33`), which the description does not cover.
-- Spec choice: the design default. A request from a searching user (or any member of a searching party) replaces the
+- Spec choice: proposed default PD-05 (README.md). A request from a searching user (or any member of a searching party) replaces the
   ticket (`queue`, why `replaced`). `already_queued` applies only once a match is found for any member of the queueing
   unit, in either the `ReadyCheck` or the `Starting` phase. ASSUMPTION MM-01.
 - To verify: change the description to "Replaces the previous queue request while searching. Fails with
@@ -62,9 +62,9 @@ core branches (queue, ready, match) several times, which weights only the random
   per queue inside `join_all_queues`.
 
 ### MM-04: Queueing while in a lobby, or while a party member is in a lobby or battle
-- Kind: Gap + Assumption
-- Evidence: Tachyon does not say. The design doc says "A user is in at most one of: lobby, matchmaking queue, battle.
-  Queueing while in a lobby is not allowed (reply invalid_request)."
+- Kind: Gap + Proposed default (PD-03)
+- Evidence: Tachyon does not say. Proposed default PD-03 (README.md): a user is in at most one of lobby, matchmaking
+  ticket, matchmaking battle, and queueing from a lobby fails with `invalid_request`.
 - Spec choice: if any member of the queueing unit (the party, or the caller alone) is in a battle →
   `already_in_battle`. If any member is in a lobby → `invalid_request`. `activityExclusive` is an invariant. The lobby
   module must refuse `lobby/join` / `lobby/create` while the user is in matchmaking (interface C1). The model's
@@ -131,7 +131,8 @@ core branches (queue, ready, match) several times, which weights only the random
 - To verify: —
 
 ### MM-10: A repeated `ready` succeeds in the spec; teiserver answers `no_match`
-- Kind: Assumption + Divergence-teiserver
+- Kind: Assumption (teiserver differs; Tachyon has no rule for a repeated `ready`, so this is no divergence)
+- Review: Partial, Low
 - Evidence: the schema only has `no_match`. teiserver `pairing_room.ex:185-190`: a user not in `awaiting` (already
   readied) → `{:error, :no_match}`. It sets `readied?: true` before asking the room (`session.ex:654`).
 - Spec choice: `ready` while already ready → `Ok`, no events (why `already_ready`). `no_match` only when the user has no
@@ -161,7 +162,7 @@ core branches (queue, ready, match) several times, which weights only the random
 ### MM-13: The autohost start is retried forever; nothing says when the server gives up
 - Kind: Gap + Assumption
 - Evidence: README 8: "If the autohost doesn't respond quickly, or if it sends a failed response, the server should
-  repeat this step." The design says retry on another autohost.
+  repeat this step." Proposed default PD-09 (README.md): matchmaking retries on another autohost.
 - Spec choice: `startFailed` is a no-op (the match stays `Starting`). `startGaveUp` (ASSUMPTION) removes the match and
   sends `lost` + `cancelled(server_error)` to all its members. `cancel` stays possible in `Starting` and acts as a
   decline. The autohost-side cleanup is out of scope.
@@ -182,30 +183,72 @@ core branches (queue, ready, match) several times, which weights only the random
 - To verify: —
 
 ### MM-16: teiserver answers `already_queued` to any queue request while searching
-- Kind: Divergence-teiserver
+- Kind: Proposed default (PD-05) + Divergence-bar-lobby
+- Review: Partial, Low
 - Evidence: `session.ex:633-637`: `{:searching, _} -> {:reply, {:error, :already_queued}, state}` and the same for
-  `{:pairing, _}`. Test `matchmaking_test.exs:189-194` asserts it. The schema says "Should cancel the previous queue",
-  and the design says replace while searching (MM-01).
+  `{:pairing, _}`. Test `matchmaking_test.exs:189-194` asserts it. `queue.ts` is itself contradictory (MM-01), and
+  teiserver implements the consistent `already_queued` reading. PD-05 (README.md) proposes replace while searching;
+  teiserver's choice is noted, not a divergence.
 - Spec choice: replace (`queue`, why `replaced`).
-- bar-lobby: never re-queues while searching (the button exists only in `Idle`, `views/play/matchmaking.vue:67,83`).
+- Implementation part (Divergence-bar-lobby): never re-queues while searching (the button exists only in `Idle`, `views/play/matchmaking.vue:67,83`).
   But on any `queue` failure other than `version_mismatch` it sets `status: Idle` (`logic/matchmaking.ts:166-167`). If
   the server still has the user queued (`already_queued`, e.g. after a reconnect that missed `user/self`), the UI shows
   Idle while the server keeps the user queued.
 - To verify: teiserver test: queue 1v1, then queue 2v2 → expect success and user/self queues = [2v2].
 
 ### MM-17: teiserver does not enforce the activity slot; `already_in_battle` is never returned
-- Kind: Divergence-teiserver
+- Kind: Divergence-teiserver (battle half) + Proposed default (PD-03) (lobby half)
+- Review: Partial, Medium
 - Evidence: `session.ex:611-639` (`join_queues`) checks only `state.matchmaking` and the party, not `state.lobby` or
   `state.battle`. `grep already_in_battle lib/` finds nothing. `lobby/join` / `lobby/create` (`session.ex:952-1021`)
   do not check `state.matchmaking`. So a user can be queued and in a lobby at once, and can queue while in a battle.
   When a match then starts, `handle_cast({:battle, {:start,...}})` (`session.ex:1342-1364`) prefers the matchmaking
   branch and keeps the lobby.
+- Implementation part (Divergence-teiserver): queueing while in a battle succeeds, so the schema reason
+  `already_in_battle` (`src/schema/matchmaking/queue.ts:38`) is never returned.
+- Not a divergence: the lobby half (queued and in a lobby at once) is measured against PD-03 (README.md); Tachyon is
+  silent (MM-04).
 - Spec choice: MM-04 guards; `activityExclusive`.
-- To verify: teiserver test: join a lobby, then `matchmaking/queue` → expect `invalid_request`. Start a battle, then
+- To verify: teiserver test: join a lobby, then `matchmaking/queue` → expect `invalid_request` (under PD-03). Start a battle, then
   queue → expect `already_in_battle`.
+
+### MM-24: Ready-check duration: the schema says 10 s, teiserver uses 20 s
+- Kind: Contradiction (minor) + Divergence-teiserver
+- Review: Confirmed-minor, Low
+- Evidence: `ready.ts:8` "within 10s". `found.timeoutMs` carries the real value. teiserver `pairing_timeout: 20_000`
+  (`queue_server.ex:111`). bar-lobby uses `timeoutMs` (`logic/matchmaking.ts:246`), so it is unaffected.
+- Implementation part (Divergence-teiserver, minor): `pairing_timeout: 20_000`; harmless, because `timeoutMs` carries
+  the real value.
+- Spec choice: durations are not modelled.
+- To verify: replace "10s" with "within `timeoutMs` of found".
+
+### MM-25: `system/disconnect` in a ready check withdraws the user at once (divergence refuted)
+- Kind: Refuted (was Divergence-teiserver): the session's stop after `system/disconnect` fires the queue's `{:player, id}` monitor, and `remove_member` cancels the pairing room at once
+- Review: Refuted
+- Evidence: the entry claimed that `session.ex:588-604` leaves the queues only in `{:searching, ...}`, so that in
+  `{:pairing, ...}` the room waits for the full timeout. That overlooks this chain (REVIEW.md):
+  `handle_call(:disconnect)` returns `{:stop, :normal, :ok, ...}` (`session.ex:604`); the queue monitors every player's
+  session as `{:player, id}` from `add_member_to_queue` (`queue_server.ex:694-704`) and keeps the monitor until
+  `disband_pairing` (`:404-416`); the DOWN reaches `remove_player` → `remove_member` → `PairingRoom.cancel`
+  (`:639-642`). The room is cancelled at once, as for a session that times out (`queue_server.ex:481-485`).
+- Spec choice: `sessionExpired` (was `sessionEnded`) withdraws at once: the others get `lost` and resume. This agrees
+  with teiserver.
+- To verify: —
+
+### MM-28: README step 8/9 names commands that do not exist
+- Kind: Contradiction
+- Evidence: README 8 "[autohost/battleStart](#autohost/battleStart)" and 9 "[battle/battleStart](#battle/battleStart)".
+  The schema has `autohost/start` and `battle/start`.
+- Spec choice: `battleStarted` sends `BattleStart` (= `battle/start`) to the members.
+- To verify: fix the links.
+
+## Implementation (teiserver b36429f, bar-lobby ee58acd)
+
+Entries under Protocol that also carry an implementation part (marked in the entry): MM-16, MM-17, MM-24.
 
 ### MM-18: A party cannot resume searching after `lost`: it gets `cancelled(server_error)` instead
 - Kind: Divergence-teiserver (from reading code; no test covers it)
+- Review: Confirmed, High
 - Evidence: after `lost` (decline by an opponent, or a ready timeout with this party fully ready), each member's session
   calls `join_matchmaking(q_refs, state)` (`session.ex:1300-1310`). That calls `QueueServer.join_queue(..., party_id)`
   with the party id set. The queue expects a `pending_parties` slot created by `Party.join_queues`. There is none, so
@@ -219,6 +262,7 @@ core branches (queue, ready, match) several times, which weights only the random
 
 ### MM-19: The party is never unlocked after a cancel or after a successful match
 - Kind: Divergence-teiserver (same as party.md PARTY-15, seen from matchmaking)
+- Review: Confirmed, High
 - Evidence: party.md PARTY-15. In addition, `pairing_room.ex:121-182` (`start_match`, both success and failure) never
   calls `Party.matchmaking_notify_cancel`. So after a party plays a matchmaking game, its next `matchmaking/queue`
   fails `already_queued` (`party/server.ex:352-359` → `tachyon_handler.ex:394-395`), and `party/invite` fails, until
@@ -230,6 +274,7 @@ core branches (queue, ready, match) several times, which weights only the random
 
 ### MM-20: teiserver never sends `checkAssets` and never returns `party_missing_asset`
 - Kind: Divergence-teiserver
+- Review: Confirmed, Medium
 - Evidence: `grep -rn "checkAssets\|check_assets\|party_missing_asset" lib/` finds nothing. Party queueing
   (`party/server.ex:361-405`) asks no member about assets. bar-lobby implements the handler
   (`src/main/tachyon/tachyon.handlers.ts:78-100`: returns `missing`/`complete` and alerts "Party queue rejected, missing
@@ -242,6 +287,7 @@ core branches (queue, ready, match) several times, which weights only the random
 
 ### MM-21: Asset change: teiserver sends `server_error`, not `version_changed`, so bar-lobby does not refresh
 - Kind: Divergence-teiserver (and an interaction with bar-lobby)
+- Review: Confirmed, Medium
 - Evidence: `queue_server.ex:450-465`: a new asset version stops the queue (`{:shutdown, :asset_changed}`). The sessions'
   queue monitor fires and sends `cancelled(server_error)` (`session.ex:1576-1596`). Tests
   `matchmaking_test.exs:318-343` check only for `matchmaking/cancelled`. bar-lobby re-lists queues only on
@@ -252,6 +298,7 @@ core branches (queue, ready, match) several times, which weights only the random
 
 ### MM-22: teiserver never sends `matchmaking/queueUpdate`
 - Kind: Divergence-teiserver (the README says "can", so it is allowed; recorded because bar-lobby relies on it)
+- Review: Confirmed-minor, Low
 - Evidence: `broadcast_update` (`queue_server.ex:743-748`) only goes to the admin PubSub (`matchmaking.ex:117-125`).
   `grep queueUpdate lib/` finds nothing. bar-lobby shows `playersQueued` from it (`logic/matchmaking.ts:212-216`), which
   stays 0.
@@ -260,32 +307,19 @@ core branches (queue, ready, match) several times, which weights only the random
 
 ### MM-23: teiserver gives up on the first autohost failure; Tachyon says to retry
 - Kind: Divergence-teiserver
+- Review: Confirmed, Medium
 - Evidence: `pairing_room.ex:121-150`: no autohost, or `start_battle` error → `disband_pairing` and
   `notify_lost({:server_error, reason})` to everyone → the sessions send `lost` + `cancelled(server_error)` and leave
-  all queues (`session.ex:1290-1296`). README 8 says "the server should repeat this step", and the design says retry on
+  all queues (`session.ex:1290-1296`). README 8 says "the server should repeat this step", and proposed default PD-09 (README.md) retries on
   another autohost. teiserver also sends a `details` field with `server_error` (`tachyon_handler.ex:163`) that the
   `cancelled` schema does not define.
 - Spec choice: `startFailed` = retry (no-op); `startGaveUp` is the teiserver behaviour, allowed as an eventual step
   (MM-13).
 - To verify: —
 
-### MM-24: Ready-check duration: the schema says 10 s, teiserver uses 20 s
-- Kind: Contradiction (minor) + Divergence-teiserver
-- Evidence: `ready.ts:8` "within 10s". `found.timeoutMs` carries the real value. teiserver `pairing_timeout: 20_000`
-  (`queue_server.ex:111`). bar-lobby uses `timeoutMs` (`logic/matchmaking.ts:246`), so it is unaffected.
-- Spec choice: durations are not modelled.
-- To verify: replace "10s" with "within `timeoutMs` of found".
-
-### MM-25: `system/disconnect` in a ready check leaves the user in the match until the timeout
-- Kind: Divergence-teiserver (minor)
-- Evidence: `session.ex:588-604` leaves the queues only in `{:searching, ...}`. In `{:pairing, ...}` it does nothing,
-  so the room waits for the full timeout and then everyone gets `lost`. A session that times out
-  (`queue_server.ex:481-485` `DOWN {:player}`) does cancel the room at once.
-- Spec choice: `sessionExpired` (was `sessionEnded`) withdraws at once: the others get `lost` and resume.
-- To verify: —
-
 ### MM-26: Smaller teiserver defects found while reading the matchmaking path
 - Kind: Divergence-teiserver (from reading code)
+- Review: Confirmed, High
 - Evidence:
   - `remove_from_pending_parties` (`queue_server.ex:646-655`) returns a bare state map, but `remove_player` callers
     match `:not_queued | {:ok, state}` (`:388-396`, `:481-485`). A member who leaves during the 5 s pending-party window
@@ -296,44 +330,41 @@ core branches (queue, ready, match) several times, which weights only the random
     client gets nothing, and the session stays `:searching` for a queue it is no longer in.
   - `party_join_queue` returns `{:no, :invalid_queue}` for an unknown queue (`queue_server.ex:211`). `party/server.ex:366-372`
     matches only `{:ok, _}` / `{:error, _}`, so a party queue with an unknown id crashes the party process instead of
-    replying `invalid_queue_specified`.
+    replying `invalid_queue_specified`. The caller's `:gen_statem.call` then exits with a non-`:noproc` reason
+    (`party/server.ex:142-143` catches only `:noproc`), so the caller's session dies too. Any party member can trigger
+    it with an unknown queue id (the schema accepts any string).
   - `party_join_queue` skips `member_can_join_queue?` (missing maps/engines). The members' later individual joins fail,
     and `session.ex:1515-1517` then raises "todo: cancel the matchmaking in the party". The test
     `party_matchmaking_test.exs:31-33` is `@tag :skip` ("TODO: make this test pass").
 - Spec choice: n/a (these are implementation crashes; the spec has the intended outcomes).
+- See also: MM-30 (a further defect in the same file).
 - To verify: the listed scenarios as teiserver tests.
 
 ### MM-27: bar-lobby treats `lost` as "back to searching" even for players who get `cancelled` next
 - Kind: Divergence-bar-lobby (benign)
+- Review: Confirmed-minor, Low
 - Evidence: `logic/matchmaking.ts:218-223`: `onLostEvent` sets `Searching`. A non-ready player receives `lost` then
-  `cancelled(ready_timeout)` (teiserver `session.ex:1288-1291`), so the UI briefly shows Searching and then Idle. The
+  `cancelled(ready_timeout)` (teiserver `session.ex:1288-1291`), so the UI shows Searching for a moment and then Idle. The
   local countdown (`:58-61`) also sets Idle at the deadline, before the server's `lost`, which then sets Searching
   again. In the spec, `lost` and `cancelled` arrive in one step. The client is right only if `cancelled` comes after
   `lost`.
 - Spec choice: the events are a set, so their order is not modelled.
 - To verify: the README should say that `lost` comes before `cancelled` when both are sent.
 
-### MM-28: README step 8/9 names commands that do not exist
-- Kind: Contradiction
-- Evidence: README 8 "[autohost/battleStart](#autohost/battleStart)" and 9 "[battle/battleStart](#battle/battleStart)".
-  The schema has `autohost/start` and `battle/start`.
-- Spec choice: `battleStarted` sends `BattleStart` (= `battle/start`) to the members.
-- To verify: fix the links.
-
-### MM-29: Implementation check per command (beyond the entries above)
+### MM-29: Implementation check per command (beyond the other entries)
 - Kind: Divergence check
 - list: teiserver `tachyon_handler.ex:340-361` returns every queue with `version`. bar-lobby stores `playlists`, picks a
   default and checks downloads (`logic/matchmaking.ts:67-88`). Matches.
 - queue: success replies, `queuesJoined` to the other members only (`session.ex:1499-1513`; the initiator's cast is
   ignored because it is already `:searching`, `:1520-1524`) match the README. bar-lobby takes `queues[0]` only
   (`logic/matchmaking.ts:288-297`, "single queue joined at a time"); its own requests always carry one queue (`:155-157`).
-  Divergences: MM-16, MM-17, MM-20, MM-07.
+  Related: MM-16 (PD-05), MM-17, MM-20, MM-07 (gap).
 - cancel: `not_queued` when idle (`session.ex:1877-1880`). On success, the handler returns the reply and then
   `cancelled{intentional}` (`tachyon_handler.ex:400-409`), as the README says. Party mates get `party_user_left`
   (`queue_server.ex:631-633`). bar-lobby sets Idle before the reply (`logic/matchmaking.ts:177-189`). Matches, apart
   from MM-19.
 - ready: `no_match` outside pairing matches. `foundUpdate(readyCount)` goes to all room members
-  (`pairing_room.ex:192-198`). Divergence MM-10. bar-lobby sets `MatchAccepted` (`logic/matchmaking.ts:194-206`).
+  (`pairing_room.ex:192-198`). MM-10 (no rule in Tachyon). bar-lobby sets `MatchAccepted` (`logic/matchmaking.ts:194-206`).
 - found: sent to every paired player with `queueId` and `timeoutMs` (`pairing_room.ex:109-116`). A session that is not
   searching (a race between two queues) declines the room (`session.ex:1246-1257`), which is the same as a cancel.
   bar-lobby ignores `queueId` (`logic/matchmaking.ts:241-247`).
@@ -342,7 +373,24 @@ core branches (queue, ready, match) several times, which weights only the random
   emitted.
 - checkAssets / queueUpdate: never sent by teiserver (MM-20, MM-22). bar-lobby handles both.
 
-## Coverage
+### MM-30: `party_id in state.pending_parties` is always false
+- Kind: Divergence-teiserver (from reading code)
+- Review: Confirmed (found by the review under MM-26; not scored)
+- Evidence: `queue_server.ex:427` tests `party_id in state.pending_parties`. On a map, `in` tests `{key, value}`
+  membership, so a bare party id is never found and the test is always false.
+- Spec choice: n/a (implementation defect).
+- To verify: use `Map.has_key?(state.pending_parties, party_id)`, and add a test for the branch it guards.
+
+## Model notes
+
+### Open points
+
+- `Outcome` here has `requests: Set[(UserId, ServerRequest)]` (checkAssets, battle/start) and `why`. A shared
+  `requests` field in `common.qnt` would let one module own `battle/start`; common.qnt stays unchanged (INT-D5).
+- Apalache: `--max-steps=2` passes in about 190 s with `JVM_ARGS=-Xmx6G`; 3 steps was not attempted.
+  `teamsFormable` was rewritten without `setOfMaps`, which Apalache refuses to expand.
+
+### Coverage
 
 | Command / step | Outcome | Status |
 |---|---|---|
@@ -381,7 +429,7 @@ core branches (queue, ready, match) several times, which weights only the random
 | env/partyLeave | party ticket cancelled | witnessed `party_unqueued`, partyLeaveTest |
 | env/sessionExpired | withdraw, others lost | witnessed `withdrawn`, sessionExpiredTest |
 
-## Seeded mutations
+### Seeded mutations
 
 Each was run on a copy (`quint test` plus `safety` at 20000 × 30, then the single conjuncts) and then reverted.
 
@@ -395,7 +443,7 @@ Each was run on a copy (`quint test` plus `safety` at 20000 × 30, then the sing
 | M6 | `cancel` denial reason `no_match` instead of `not_queued` | replaceAndDenialsTest; `reasonsInSchema` |
 | M7 | `partyJoin` without the "party is searching" lock | **not caught**. The mutant is equivalent at `MAX_PARTY = 2`: a searching party already has 2 members, so the size guard refuses the join. Covering it needs an instance with `MAX_PARTY = 3`. |
 
-## Cross-module interface
+### Cross-module interface
 
 Predicates this module assumes or provides (`inMM(u)` = u is in a searching ticket or a found match):
 
@@ -425,16 +473,7 @@ Predicates this module assumes or provides (`inMM(u)` = u is in a searching tick
 - C6 assets: `missing(u, q)` is what u's client would answer to `checkAssets(q)` (`missing`/`downloading`/failure/timeout
   → missing).
 
-## Requests to the orchestrator
-
-- R1: `Outcome` here has `requests: Set[(UserId, ServerRequest)]` (server->user requests: checkAssets, battle/start) and
-  `why`. A shared `requests` field in `common.qnt` would let the battle module own `battle/start` and let the lobby
-  module reuse it.
-- R2: settle C3 against party.md I2 (when the party lock ends). Settled by INT-D3: C3 is binding (party.md I2 rewritten).
-- R3: Apalache: `--max-steps=2` passes in about 190 s with `JVM_ARGS=-Xmx6G`. 3 steps was not attempted (shared
-  server, other agents running). `teamsFormable` was rewritten without `setOfMaps`, which Apalache refuses to expand.
-
-## Integration changes
+### Integration changes
 
 Made by the integration step (findings/system.md, decisions INT-D1..D5):
 

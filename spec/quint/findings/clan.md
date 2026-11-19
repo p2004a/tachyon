@@ -34,39 +34,10 @@ Invariants in `safety`:
 
 **Implementation status (CLAN-01): nothing of this group is implemented in teiserver or bar-lobby.**
 Every clan request gets `command_unimplemented` from teiserver. bar-lobby sends no clan command and
-handles no clan event. So the per-command "Divergence" entries below are all the same divergence
-(CLAN-01). The rest of this file holds protocol gaps and assumptions to settle before anyone implements clans.
+handles no clan event. So the per-command divergences are all the same divergence (CLAN-01, under
+Implementation). The Protocol part holds gaps and assumptions to settle before anyone implements clans.
 
-## Findings
-
-### CLAN-01: Clans are unimplemented in teiserver and bar-lobby; every clan request replies command_unimplemented
-- Kind: Divergence-teiserver, Divergence-bar-lobby
-- Evidence: `grep -rn '"clan/'` finds nothing in teiserver `lib/`, `test/` or bar-lobby `src/`.
-  teiserver's vendored schema `priv/tachyon/v0/schema/` has no `clan/` directory. So
-  `Schema.parse_message` returns `{:missing_schema, ...}` and `lib/teiserver/tachyon/transport.ex:218-220`
-  replies `Schema.error_response(command_id, message_id, :command_unimplemented)`. If the schema were
-  vendored, the catch-all `lib/teiserver/player/tachyon_handler.ex:1096-1097`
-  (`def handle_command(_command_id, ...) do {:error_response, :command_unimplemented, state}`) would answer
-  the same. No clan event is ever sent. bar-lobby only carries a `clanId` field
-  (`src/main/model/user.ts:20` `clanId: string | null;`, `src/renderer/store/db.ts:72`,
-  `src/renderer/views/profile/[userId].vue:21` shows `user.clanId`).
-- Per command, the reply on teiserver today is `Failed(command_unimplemented)` (allowed by every clan response schema):
-  create, update, delete, invite, cancel, accept, decline, kick, leave, setRole, view, viewList.
-  Events updated/deleted/invited/kicked/roleChanged are never sent. bar-lobby never sends any of the requests.
-- Spec choice: the model is the protocol only. An implementation at its present state satisfies
-  `reasonsInSchema` trivially and nothing else.
-- To verify: none. Keep this file as the acceptance spec when clans are implemented.
-
-### CLAN-02: teiserver and bar-lobby use `clanId` in user objects; the protocol has `clanBaseData`
-- Kind: Divergence-teiserver, Divergence-bar-lobby (touches the user group)
-- Evidence: tachyon `schema/definitions/user.json:9-26`: `"clanBaseData": { "anyOf": [ {clanId + name, tag,
-  language}, { "type": "null" } ] }`, required. teiserver's vendored `priv/tachyon/v0/schema/definitions/user.json:9`
-  `"clanId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }`, and it sends `clanId: nil` in
-  `user/updated` (`tachyon_handler.ex:217`), `user/info` (`:486`) and `user/self` (`:1108`).
-  `clanInvites: []` carries the comment "TODO. For now it's just there so clients don't break on missing
-  required property" (`:1118-1120`). bar-lobby `src/main/model/user.ts:20` `clanId: string | null`.
-- Spec choice: `atMostOneClan` follows from `clanBaseData` being a single value (CLAN-A1).
-- To verify: bump teiserver's vendored schema; bar-lobby should read `clanBaseData` (null-safe).
+## Protocol (Tachyon)
 
 ### CLAN-03: Several replies and events lack the clanId their consumers need
 - Kind: Gap
@@ -199,7 +170,50 @@ handles no clan event. So the per-command "Divergence" entries below are all the
 - Spec choice: no cap, no interaction with parties.
 - To verify: drop "kind of party", or define the relation.
 
-## Coverage
+## Implementation (teiserver b36429f, bar-lobby ee58acd)
+
+
+### CLAN-01: Clans are unimplemented in teiserver and bar-lobby; every clan request replies command_unimplemented
+- Kind: Divergence-teiserver, Divergence-bar-lobby (minor: `command_unimplemented` is a sanctioned reason in every clan response)
+- Review: Confirmed-minor, Low
+- Evidence: `grep -rn '"clan/'` finds nothing in teiserver `lib/`, `test/` or bar-lobby `src/`.
+  teiserver's vendored schema `priv/tachyon/v0/schema/` has no `clan/` directory. So
+  `Schema.parse_message` returns `{:missing_schema, ...}` and `lib/teiserver/tachyon/transport.ex:218-220`
+  replies `Schema.error_response(command_id, message_id, :command_unimplemented)`. If the schema were
+  vendored, the catch-all `lib/teiserver/player/tachyon_handler.ex:1096-1097`
+  (`def handle_command(_command_id, ...) do {:error_response, :command_unimplemented, state}`) would answer
+  the same. No clan event is ever sent. bar-lobby only carries a `clanId` field
+  (`src/main/model/user.ts:20` `clanId: string | null;`, `src/renderer/store/db.ts:72`,
+  `src/renderer/views/profile/[userId].vue:21` shows `user.clanId`).
+- Per command, the reply on teiserver today is `Failed(command_unimplemented)` (allowed by every clan response schema):
+  create, update, delete, invite, cancel, accept, decline, kick, leave, setRole, view, viewList.
+  Events updated/deleted/invited/kicked/roleChanged are never sent. bar-lobby never sends any of the requests.
+- Spec choice: the model is the protocol only. An implementation at its present state satisfies
+  `reasonsInSchema` trivially and nothing else.
+- To verify: none. Keep this file as the acceptance spec when clans are implemented.
+
+### CLAN-02: teiserver and bar-lobby use `clanId` in user objects; the protocol has `clanBaseData`
+- Kind: Divergence-teiserver, Divergence-bar-lobby (touches the user group)
+- Review: Confirmed, Low
+- Evidence: tachyon `schema/definitions/user.json:9-26`: `"clanBaseData": { "anyOf": [ {clanId + name, tag,
+  language}, { "type": "null" } ] }`, required. teiserver's vendored `priv/tachyon/v0/schema/definitions/user.json:9`
+  `"clanId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }`, and it sends `clanId: nil` in
+  `user/updated` (`tachyon_handler.ex:217`), `user/info` (`:486`) and `user/self` (`:1108`).
+  `clanInvites: []` carries the comment "TODO. For now it's just there so clients don't break on missing
+  required property" (`:1118-1120`). bar-lobby `src/main/model/user.ts:20` `clanId: string | null`.
+- Spec choice: `atMostOneClan` follows from `clanBaseData` being a single value (CLAN-A1).
+- To verify: bump teiserver's vendored schema; bar-lobby should read `clanBaseData` (null-safe).
+
+## Model notes
+
+### Open points
+
+- session.qnt does not model `user/self` contents. If a module does, `clanBaseData` and `clanInvites` should be
+  functions of this module's state (Cross-module interface), and teiserver's `clanId: nil` (CLAN-02) applies there too.
+- `check.sh` has no per-directive `--seed`. The deep co-leader witnesses use the separate instance `clan_grow` with
+  `samples=400000` caps (they usually hit within 1-20 s); a `seed=` option would make them deterministic.
+
+### Coverage
 
 | Command | Outcome | Status |
 |---|---|---|
@@ -229,7 +243,7 @@ handles no clan event. So the per-command "Divergence" entries below are all the
 | all | internal_error | unreachable: server faults not modelled |
 | all | command_unimplemented | unreachable in the model. **It is the only outcome on teiserver today (CLAN-01)** |
 
-## Seeded mutations
+### Seeded mutations
 
 Each was applied to a scratch copy, run with `quint test --main=clan_test` and `quint run --invariant=safety` (and each
 sub-invariant), then discarded. `clan.qnt` is unchanged.
@@ -243,7 +257,7 @@ sub-invariant), then discarded. `clan.qnt` is unchanged.
 | M5 | `kick`: drop `t == u` guard (leader kicks himself) | `invitesAndKickTest`; `oneLeader` |
 | M6 | `accept`: drop the already-in-a-clan check | `invitesAndKickTest`; `atMostOneClan`, `oneLeader`, `permissionsRespected` |
 
-## Cross-module interface
+### Cross-module interface
 
 What this module assumes or exports, as predicates over the composed state:
 - `inClan(u) ⇔ clansOf(s,u) ≠ ∅` and `clanRole(u) = roleOf(s,u) ∈ {none, member, coLeader, leader}`. The user module's
@@ -255,10 +269,3 @@ What this module assumes or exports, as predicates over the composed state:
   session.qnt). Event recipients may be Online, Detached or Offline. Delivery to non-attached recipients is the
   session module's rule (`eventsToAttachedOnly`), which then drops clan events for them (CLAN-12).
 - Account existence: invite/kick/cancel targets range over `USERS`. An unknown userId would be `invalid_request` (not modelled).
-
-## Requests to the orchestrator
-
-- If the session/user modules model `user/self` contents, please add `clanBaseData` and `clanInvites` as functions of
-  this module's state (see Cross-module interface) and flag teiserver's `clanId: nil` (CLAN-02) there too.
-- `check.sh` has no per-directive `--seed`. The deep co-leader witnesses use a separate instance `clan_grow` with
-  `samples=400000` caps (they usually hit within 1-20 s). A `seed=` option would make them deterministic.

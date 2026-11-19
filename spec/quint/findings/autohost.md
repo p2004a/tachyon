@@ -62,28 +62,32 @@ witness needs about 1–10 s of deep random search. Extra runs: 2 × 60000
 samples × 40 steps on `autohost_up` found no violation. Apalache: see the end
 of this file.
 
-## Findings
+## Protocol (Tachyon)
 
-### AH-01: The autohost session dies with its connection; no grace, the battle is dropped after 100 ms with no kill and no battle/ended
-- Kind: Divergence-teiserver
+### AH-01: Battles do not survive an autohost disconnect (PD-10): teiserver drops them after 100 ms with no kill, and players get only a placeholder battle/ended
+- Kind: Proposed default (PD-10)
+- Review: Partial, High (engines keep running untracked and cannot be killed, AH-03)
 - Evidence:
+  - Tachyon (`docs/schema/autohost.md`) says nothing about autohost disconnects. Proposed default PD-10 (README.md): battles survive an autohost disconnect for an autohost grace period, then are closed as lost and the players' activity slots are freed. teiserver's behaviour below is noted against PD-10, not counted as a divergence.
   - teiserver lib/teiserver/autohost/session.ex:2-5 "a process tied to a autohost connection in such a way that it survives if the connection goes away". But :120-121 `Process.link(conn_pid)` / `Process.flag(:trap_exit, true)` and :266-272 `{:EXIT, from, reason}` -> `{:stop, reason}`: the session stops with the connection. The `data.conn_pid == nil` guards (:150, :170, :189, :203) are dead code.
-  - lib/teiserver/tachyon_battle/battle.ex:155-159 "the timeout is absurdly short because there is no real recovery if the autohost goes away", `autohost_timeout: Map.get(args, :autohost_timeout, 100)`. :311-320: on DOWN, a timer, then `{:stop, :normal, state}`. No `end_tachyon_match`, no `notify_battle_ended`, no kill.
-  - Design default: battles survive an autohost disconnect for a grace period, and the server kills dropped battles on reconnect.
+  - lib/teiserver/tachyon_battle/battle.ex:155-159 "the timeout is absurdly short because there is no real recovery if the autohost goes away", `autohost_timeout: Map.get(args, :autohost_timeout, 100)`. :311-320: on DOWN, a timer, then `{:stop, :normal, state}`. No `end_tachyon_match` and no kill. Players still get a `battle/ended`: AH-10's placeholder, sent by their own session's `{:battle, id}` monitor.
 - Spec choice: `disconnect` keeps PRunning battles and `graceExpired` makes them PLost with battle/ended. `noForgottenBattles` is in `safety`: every engine an autohost runs is a battle the server still tracks with `mayRun`. teiserver breaks it: after the 100 ms the engine keeps running and nothing tracks it.
 - To verify: a teiserver test that disconnects the autohost for longer than `autohost_timeout`, reconnects it, and expects `autohost/kill`.
 
 ### AH-02: On (re)connect teiserver subscribes from "now", so updates buffered during a disconnect (finished, engine_quit) are never requested
-- Kind: Divergence-teiserver
+- Kind: Gap (Tachyon does not say which `since` the server must use; teiserver's choice noted)
+- Review: Partial, Medium
 - Evidence:
   - tachyon docs/schema/autohost.md:2176 "Autohost will send all updates with time > since (not >= but >)".
   - teiserver session.ex:125-127: a fresh `SessionData` (empty `active_battles`) then `:subscribe_updates`. :362-380 `get_subscription_start` takes the min over `active_battles`, which is always empty at that point, so `Enum.min(fn -> DateTime.utc_now() end)`. test/teiserver/autohost/autohost_test.exs:65 "default subscribe messages from now".
+  - autohost.md:2176 constrains only the autohost (`> since`), and teiserver's "from now" is intentional (the test above). It matters only because battles do not outlive the connection (AH-01).
   - The `since` is the **server's** clock, while the update times are the autohost's ("Each timestamp is guaranteed to be unique for a given autohost", autohost.md:2322). Clock skew skips updates or resends them.
 - Spec choice: `connect(s, h, since)` with `since ≤ acked(h)`, the greatest autohost time applied (AH-A05). Transcript `resendTest`.
 - To verify: persist `acked` per autohost across connections, or say in the protocol that `since` is an autohost time the server has seen.
 
 ### AH-03: Updates for battles the session does not know are dropped, and kill is refused for them
-- Kind: Divergence-teiserver
+- Kind: Gap (Tachyon is silent on updates and kills for unknown battle ids; teiserver behaviour noted)
+- Review: Partial, Medium
 - Evidence:
   - session.ex:296-307 "TODO: will need to "resurrect" a battle ... But for now, just drop the message".
   - session.ex:192-194 `kill_battle` returns `{:error, :invalid_battle}` when the battle is not in `active_battles`. The same check is at :179-180 (send_message) and :206-208 (add_player).
@@ -91,68 +95,26 @@ of this file.
 - Spec choice: the server keeps the kill obligation (`mayRun`) for every dropped battle. `canSendKill` is enabled for it while the autohost is connected (`droppedKillable`). An engine_quit/crash for a dropped battle clears the obligation (`deliverUpdate`, non-running branch).
 - To verify: protocol owners: should an update for an unknown battleId trigger `autohost/kill`? (`autohost/status` has no battle ids, AH-13.)
 
-### AH-04: A late autohost/start success after the server's 5 s call timeout leaves a zombie engine
-- Kind: Divergence-teiserver
-- Evidence:
-  - session.ex:41-52 `:gen_statem.call(..., @default_call_timeout)` (5000 ms). It catches only `{:noproc, _}`, so a timeout exit crashes `Battle.init` (battle.ex:170-186).
-  - The transport keeps the request pending with `timeout = Keyword.get(opts, :timeout, :timer.seconds(10_000))` (lib/teiserver/tachyon/transport.ex:390). That is 10 000 **seconds**, probably meant to be 10 s.
-  - When the response arrives, `battle_started` (session.ex:382-401) puts the battle into `active_battles` and replies to a caller that is gone. The DOWN of the dead battle process (session.ex:247-264) may already have been handled, so the entry is never removed. No kill is sent, and `find_autohost` load accounting is off.
-- Spec choice: `startTimeout` -> PFailed with `mayRun` kept (AH-A02). A late `Ok` emits nothing, and the server kills (transcript `lateSuccessTest`, witness `lateStartKilled`).
-- To verify: a test where the autohost answers `autohost/start` after 5 s and the server is expected to send `autohost/kill`.
-
-### AH-05: No retry of autohost/start, and no kill-and-fail on battle_already_exists
-- Kind: Divergence-teiserver
-- Evidence:
-  - tachyon docs/schema/matchmaking.md:14 "If the autohost doesn't respond quickly, or if it sends a failed response, the server should repeat this step."
-  - session.ex:40 "TODO: there should be some kind of retry here". matchmaking/pairing_room.ex:143-157: on `{:error, reason}` it disbands and sends `matchmaking/lost`, with no other autohost tried. tachyon_lobby/lobby.ex:1078-1081: the error goes back to the lobby caller.
-  - `battle_already_exists` and `engine_version_not_available` are only passed on as strings (autohost/tachyon_handler.ex:238-244). No test sends `battle_already_exists`.
-  - Design: a retried start answered `battle_already_exists` -> kill-and-fail; matchmaking retries on another autohost.
-- Spec choice: `retryStart` (same battle id, same autohost) and `onResponse`: `battle_already_exists` -> PFailed with the kill obligation kept. A retry on another autohost is a new battle (`requestBattle`) and is the matchmaking/lobby module's choice. Transcript `retryAlreadyExistsTest`.
-- To verify: protocol: does "repeat this step" reuse the battleId? That decides whether `battle_already_exists` can happen at all; with fresh UUIDs per attempt (teiserver tachyon_battle.ex:47) it cannot.
-
 ### AH-06: teiserver chooses an autohost only from the last status, with no load accounting between status events
-- Kind: Divergence-teiserver
+- Kind: Gap (Tachyon says nothing about admission or capacity accounting between status events; teiserver behaviour noted)
+- Review: Partial, Low
 - Evidence: lib/teiserver/autohost.ex:54-61 `Enum.find(fn %AT.Overview{max_battles: m, current_battles: c} -> m > c end)`. Two starts before the next `autohost/status` both pass. Nothing counts pending starts (`pending_battles` in types/session_data.ex is never used).
 - Spec choice: `canRequest` requires `max(serverLoad, reported currentBattles) < reported maxBattles`, where `serverLoad` counts Starting/Running battles and battles with a kill obligation (AH-A07). `withinCapacity` (an autohost never runs more than MAX_BATTLES) is in `safety`; mutation M3 shows that the status-only rule breaks it.
 - To verify: protocol: may the autohost refuse a start when full, and with which reason? The schema only allows `internal_error` (AH-13).
 
-### AH-07: availableEngines is ignored, and installEngine, kickPlayer, mutePlayer, specPlayers and sendCommand are never sent
-- Kind: Divergence-teiserver
-- Evidence:
-  - autohost/tachyon_handler.ex:174-186 reads only `maxBattles`/`currentBattles` from `autohost/status`. autohost.ex:50-55 "search params (none for now)".
-  - `grep -rn "installEngine\|kickPlayer\|mutePlayer\|specPlayers\|sendCommand" lib` finds nothing. `handle_response` handles only start/sendMessage/kill/addPlayer (tachyon_handler.ex:231-232).
-  - The result is `engine_version_not_available` -> `matchmaking/cancelled(server_error)` (test/teiserver_web/tachyon/matchmaking_test.exs:959-990).
-- Spec choice: the server may pick any engine (that is why `engine_version_not_available` exists) and may call `installEngine`. A later `status` reports the new engine (transcript `engineMissingTest`).
-- To verify: should the server pick only autohosts whose `availableEngines` contain the engine? Tachyon is silent (Gap).
-
 ### AH-08: The battle result is a majority of the reporters, not of the players
-- Kind: Divergence-teiserver
+- Kind: Proposed default (PD-11)
+- Review: Partial, Medium
 - Evidence:
   - schema/autohost/update/event.json:32 "The battle finished, generated once per every single player reporting who won."
   - teiserver battle.ex:379-393: `min_required_votes = (finished_reports |> Map.keys() |> Enum.count()) / 2`. A single report out of 8 players decides the result. battle.ex:48 "this majority voting won't work for 1v1s".
-  - Design: per-player reports -> one result by majority, else none.
+  - Tachyon defines no aggregation rule. Proposed default PD-11 (README.md): one result by majority of per-player finished reports, else no result. teiserver's rule is noted, not counted as a divergence; with its strict `>`, 1 report out of N decides, which deserves owner attention.
 - Spec choice: `majority(b, TEAMS)` takes a strict majority over `b.players`; otherwise there is no result (-1). Transcript `noMajorityTest`.
 - To verify: protocol owners: the majority of which set? 1v1: two disagreeing reports -> none.
 
-### AH-09: The battle process has no idempotency by update time; the session's ack handler corrupts its state on an unexpected ack
-- Kind: Divergence-teiserver
-- Evidence:
-  - battle.ex:257-307 applies every update. A resent `start` calls `Battle.start_tachyon_match` again (:263-265). This is latent while AH-02 prevents resends.
-  - session.ex:337-349: in the `{:empty, _queue}` branch the `update_in` callback returns `data` (the whole `SessionData`) as the battle's `BattleData`. The next ack for that battle then fails the `%AT.BattleData{}` match. An ack that is not the head of the queue raises `CaseClauseError` and crashes the session (and the linked connection).
-- Spec choice: `deliverUpdate` drops `n.time <= b.lastTime` (witness `resentUpdateIgnored`). `recordedOnce` (start and result each recorded at most once) is in `safety`.
-- To verify: a unit test: ack with an empty queue, then another ack.
-
-### AH-10: On Lost or timeout teiserver sends a placeholder battle/ended with empty players and spectators, and never closes the match
-- Kind: Divergence-teiserver
-- Evidence:
-  - tachyon docs/schema/battle.md:11 "Sent to all players and spectators involved in a battle when it ends." The schema requires `players`, `spectators` and `winningAllyTeamIds`.
-  - teiserver player/session.ex:1661-1674: on the battle DOWN, "TODO We don't have the battle state at this point so sending just sending a placeholder event", with `players: [], spectators: []`.
-  - battle.ex:317-325 (`:autohost_timeout`, `:battle_timeout`) stops without `Battle.end_tachyon_match`. On the normal end (:278-290) it sends to `state.participants` (players, spectators and added users), which matches.
-- Spec choice: `graceExpired` sends battle/ended to all participants with the majority result so far (AH-A03). `battleEndedRecipients` is in `safety`.
-- To verify: send the real roster from the battle process before it stops.
-
 ### AH-11: The user's battle/start answer is ignored, and bar-lobby answers internal_error when assets are missing
-- Kind: Gap / Divergence-bar-lobby
+- Kind: Gap (bar-lobby's `internal_error` is the only fitting reason in the enum, so it is no divergence)
+- Review: Partial, Low
 - Evidence:
   - battle.md:216-217: the response allows `internal_error`, `unauthorized`, `invalid_request` and `command_unimplemented`. Nothing says what the server does with a failure.
   - teiserver player/tachyon_handler.ex:176-179 `{:request, "battle/start", data, [], state}` has no cb_state, and the player handler has no `handle_response`, so transport.ex:257-264 returns `{:ok, state}`.
@@ -170,7 +132,7 @@ of this file.
 
 ### AH-13: autohost/status has no battle ids, and autohost/start has no "full" reason
 - Kind: Gap
-- Evidence: schema/autohost/status/event.json requires only `maxBattles`, `currentBattles` and `availableEngines` (known gap, design). The autohost/start reasons are `battle_already_exists`, `engine_version_not_available` and the generic ones (autohost.md "Possible Failed Reasons").
+- Evidence: schema/autohost/status/event.json requires only `maxBattles`, `currentBattles` and `availableEngines` (known gap). The autohost/start reasons are `battle_already_exists`, `engine_version_not_available` and the generic ones (autohost.md "Possible Failed Reasons").
 - Spec choice: reconciliation after a reconnect uses resent updates plus kills of every battle with an obligation. A full autohost would have to answer `internal_error`; the model's autohost never needs to, because the server respects capacity (AH-A07).
 - To verify: add the running battle ids to status, and a `capacity_reached` reason.
 
@@ -204,15 +166,6 @@ of this file.
 - Spec choice: teams are ints in the model.
 - To verify: protocol: one id type, and the explicit ids in the start script.
 
-### AH-19: battle/start is not always delivered to all the battle's users
-- Kind: Divergence-teiserver
-- Evidence:
-  - player/session.ex:1337-1366: the session ignores `{:battle, {:start, ...}}` unless the user is readied in a matchmaking pairing or in a lobby ("the request is ignored").
-  - session.ex:1910-1918 `send_to_player`: "TODO tachyon_mvp: what should server do if the connection is down at that time?" If the user is disconnected, the request is not sent or stored. It is recovered only through `user/self` `currentBattle` (bar-lobby tachyon.store.ts:68).
-  - Recipients match the spec: matchmaking sends to the start-script players (matchmaking/pairing_room.ex:172-176; there are no spectators); the lobby sends to its players and spectators (tachyon_lobby/lobby.ex:1051-1053, start script :1603-1606).
-- Spec choice: battle/start goes to exactly the start-script users (players ∪ spectators) on `autohost/start` Ok, and to the added user on `autohost/addPlayer` Ok (`battleStartRecipients`, AH-A01).
-- To verify: protocol: should the battle drop users whose session refused or missed battle/start?
-
 ### AH-20: Interface with lobby.qnt: joinBattle answers before or after autohost/addPlayer
 - Kind: Contradiction (between spec modules) / Assumption
 - Evidence:
@@ -220,16 +173,7 @@ of this file.
   - teiserver lobby.ex:597-626 calls `TachyonBattle.add_player` synchronously (5 s call through the battle and autohost session) and replies Ok only after it succeeds. `capacity_reached` is decided locally at 254 participants (battle.ex:233-236), and autohost/addPlayer has no "full" reason.
   - lobby.qnt `autohostStarted`/`autohostFailed`/`battleEnded` match this module's `autohost/start` Ok, PFailed, and PEnded/PLost; battle/start goes to `members(l)` = players ∪ spectators, the same as AH-A01.
 - Spec choice: they compose if lobby `joinBattle` Ok (full = false) ⇔ `autohost/addPlayer` Ok here. `battle_full` is a server-side (lobby or battle) check before addPlayer, not an autohost answer. An addPlayer failure (internal_error, …) has no lobby/joinBattle reason other than `internal_error`.
-- To verify: orchestrator: map lobby `joinBattle(full=false)` to `sendAddPlayer` + `autohost/addPlayer` Ok.
-
-### AH-21: bar-lobby consumption of battle/start and battle/ended
-- Kind: Divergence-bar-lobby (minor)
-- Evidence:
-  - src/main/tachyon/tachyon.handlers.ts:42-50 uses only `ips[0]`, and accepts a legacy `data.ip` ("backward server compatibility").
-  - src/renderer/store/battleHistory.store.ts:18-19 deduplicates battle/ended by `battleId` (robust to resends). The AH-10 placeholder is stored as a history entry with no players.
-  - src/renderer/store/lobby.store.ts:282 "there's a chance that the client could have the connection details but no longer be a player/spectator and not receive the event": it clears the state on `currentBattle == undefined`.
-- Spec choice: none (client side). These are consistent with at-most-once battle/ended per battle.
-- To verify: bar-lobby test with an empty-roster battle/ended.
+- To verify: composition (system.qnt): map lobby `joinBattle(full=false)` to `sendAddPlayer` + `autohost/addPlayer` Ok.
 
 ### Assumptions (referenced from the model)
 - **AH-A01** (`onResponse`, start): battle/start goes to the start-script players ∪ spectators, plus users added with addPlayer.
@@ -245,6 +189,79 @@ of this file.
 - **AH-A11** (`canDeliver`): updates flow only when the connection is Up (status received) and subscribed, in time order, and never ahead of their battle's start response.
 - **AH-A12** (`disconnect`/`graceExpired`): a PRunning battle on a disconnected autohost stays PRunning until grace expiry; a PStarting one stays PStarting until its timer or a retry.
 - **AH-A13** (`onResponse`): a failed start sends no battle/ended (users never got battle/start). The requester (lobby/matchmaking) learns from the phase.
+
+## Implementation (teiserver b36429f, bar-lobby ee58acd)
+
+
+### AH-04: A late autohost/start success after the server's 5 s call timeout leaves a zombie engine
+- Kind: Divergence-teiserver
+- Review: Partial, High
+- Evidence:
+  - session.ex:41-52 `:gen_statem.call(..., @default_call_timeout)` (5000 ms). It catches only `{:noproc, _}`, so a timeout exit crashes `Battle.init` (battle.ex:170-186).
+  - The transport keeps the request pending with `timeout = Keyword.get(opts, :timeout, :timer.seconds(10_000))` (lib/teiserver/tachyon/transport.ex:390). That is 10 000 **seconds** (about 2.8 h), probably meant to be 10 s.
+  - When the response arrives, `battle_started` (session.ex:382-401) puts the battle into `active_battles` and replies to a caller that is gone. The DOWN of the dead battle process (session.ex:247-264) may already have been handled, so the entry is never removed. No kill is sent. What leaks is the `active_battles` entry and its never-acked `pending_acks`. (Load accounting is not affected: `find_autohost`, `autohost.ex:54-61`, uses the autohost-reported `currentBattles`, which counts the zombie.)
+- Spec choice: `startTimeout` -> PFailed with `mayRun` kept (AH-A02). A late `Ok` emits nothing, and the server kills (transcript `lateSuccessTest`, witness `lateStartKilled`).
+- To verify: a test where the autohost answers `autohost/start` after 5 s and the server is expected to send `autohost/kill`.
+
+### AH-05: No retry of autohost/start, and no kill-and-fail on battle_already_exists
+- Kind: Divergence-teiserver
+- Review: Confirmed, Medium
+- Evidence:
+  - tachyon docs/schema/matchmaking.md:14 "If the autohost doesn't respond quickly, or if it sends a failed response, the server should repeat this step."
+  - session.ex:40 "TODO: there should be some kind of retry here". matchmaking/pairing_room.ex:143-157: on `{:error, reason}` it disbands and sends `matchmaking/lost`, with no other autohost tried. tachyon_lobby/lobby.ex:1078-1081: the error goes back to the lobby caller.
+  - `battle_already_exists` and `engine_version_not_available` are only passed on as strings (autohost/tachyon_handler.ex:238-244). No test sends `battle_already_exists`.
+  - Proposed default PD-09 (README.md): a retried start answered `battle_already_exists` is killed and failed, and matchmaking retries on another autohost. The kill-and-fail half is measured against PD-09 and only noted; the divergence is the missing retry.
+- Spec choice: `retryStart` (same battle id, same autohost) and `onResponse`: `battle_already_exists` -> PFailed with the kill obligation kept. A retry on another autohost is a new battle (`requestBattle`) and is the matchmaking/lobby module's choice. Transcript `retryAlreadyExistsTest`.
+- To verify: protocol: does "repeat this step" reuse the battleId? That decides whether `battle_already_exists` can happen at all; with fresh UUIDs per attempt (teiserver tachyon_battle.ex:47) it cannot.
+
+### AH-07: availableEngines is ignored, and installEngine, kickPlayer, mutePlayer, specPlayers and sendCommand are never sent
+- Kind: Divergence-teiserver (minor: nothing in Tachyon obliges the server to send these requests)
+- Review: Confirmed-minor, Low
+- Evidence:
+  - autohost/tachyon_handler.ex:174-186 reads only `maxBattles`/`currentBattles` from `autohost/status`. autohost.ex:50-55 "search params (none for now)".
+  - `grep -rn "installEngine\|kickPlayer\|mutePlayer\|specPlayers\|sendCommand" lib` finds nothing. `handle_response` handles only start/sendMessage/kill/addPlayer (tachyon_handler.ex:231-232).
+  - The result is `engine_version_not_available` -> `matchmaking/cancelled(server_error)` (test/teiserver_web/tachyon/matchmaking_test.exs:959-990).
+- Spec choice: the server may pick any engine (that is why `engine_version_not_available` exists) and may call `installEngine`. A later `status` reports the new engine (transcript `engineMissingTest`).
+- To verify: should the server pick only autohosts whose `availableEngines` contain the engine? Tachyon is silent (Gap).
+
+### AH-09: The battle process has no idempotency by update time; the session's ack handler corrupts its state on an unexpected ack
+- Kind: Divergence-teiserver (latent: acks arrive in order, and there are no resends while AH-02 holds)
+- Review: Confirmed-minor, Low
+- Evidence:
+  - battle.ex:257-307 applies every update. A resent `start` calls `Battle.start_tachyon_match` again (:263-265). This is latent while AH-02 prevents resends.
+  - session.ex:337-349: in the `{:empty, _queue}` branch the `update_in` callback returns `data` (the whole `SessionData`) as the battle's `BattleData`. The next ack for that battle then fails the `%AT.BattleData{}` match. An ack that is not the head of the queue raises `CaseClauseError` and crashes the session (and the linked connection).
+- Spec choice: `deliverUpdate` drops `n.time <= b.lastTime` (witness `resentUpdateIgnored`). `recordedOnce` (start and result each recorded at most once) is in `safety`.
+- To verify: a unit test: ack with an empty queue, then another ack.
+
+### AH-10: On Lost or timeout teiserver sends a placeholder battle/ended with empty players and spectators, and never closes the match
+- Kind: Divergence-teiserver
+- Review: Confirmed, High
+- Evidence:
+  - tachyon docs/schema/battle.md:11 "Sent to all players and spectators involved in a battle when it ends." The schema requires `players`, `spectators` and `winningAllyTeamIds`.
+  - teiserver player/session.ex:1661-1674: on the battle DOWN, "TODO We don't have the battle state at this point so sending just sending a placeholder event", with `players: [], spectators: []`.
+  - battle.ex:317-325 (`:autohost_timeout`, `:battle_timeout`) stops without `Battle.end_tachyon_match`. On the normal end (:278-290) it sends to `state.participants` (players, spectators and added users), which matches.
+- Spec choice: `graceExpired` sends battle/ended to all participants with the majority result so far (AH-A03). `battleEndedRecipients` is in `safety`.
+- To verify: send the real roster from the battle process before it stops.
+
+### AH-19: battle/start is not always delivered to all the battle's users
+- Kind: Divergence-teiserver
+- Review: Confirmed, Low
+- Evidence:
+  - player/session.ex:1337-1366: the session ignores `{:battle, {:start, ...}}` unless the user is readied in a matchmaking pairing or in a lobby ("the request is ignored").
+  - session.ex:1910-1918 `send_to_player`: "TODO tachyon_mvp: what should server do if the connection is down at that time?" If the user is disconnected, the request is not sent or stored. It is recovered only through `user/self` `currentBattle` (bar-lobby tachyon.store.ts:68).
+  - Recipients match the spec: matchmaking sends to the start-script players (matchmaking/pairing_room.ex:172-176; there are no spectators); the lobby sends to its players and spectators (tachyon_lobby/lobby.ex:1051-1053, start script :1603-1606).
+- Spec choice: battle/start goes to exactly the start-script users (players ∪ spectators) on `autohost/start` Ok, and to the added user on `autohost/addPlayer` Ok (`battleStartRecipients`, AH-A01).
+- To verify: protocol: should the battle drop users whose session refused or missed battle/start?
+
+### AH-21: bar-lobby consumption of battle/start and battle/ended
+- Kind: Divergence-bar-lobby (minor)
+- Review: Confirmed-minor, Low
+- Evidence:
+  - src/main/tachyon/tachyon.handlers.ts:42-50 uses only `ips[0]`, and accepts a legacy `data.ip` ("backward server compatibility").
+  - src/renderer/store/battleHistory.store.ts:18-19 deduplicates battle/ended by `battleId` (robust to resends). The AH-10 placeholder is stored as a history entry with no players.
+  - src/renderer/store/lobby.store.ts:282 "there's a chance that the client could have the connection details but no longer be a player/spectator and not receive the event": it clears the state on `currentBattle == undefined`.
+- Spec choice: none (client side). These are consistent with at-most-once battle/ended per battle.
+- To verify: bar-lobby test with an empty-roster battle/ended.
 
 ### Per-command implementation check
 
@@ -262,7 +279,15 @@ of this file.
 | battle/start | to start-script users ✓ (19). Answer ignored (11). Not buffered while disconnected (19) | launches the game. internal_error on missing assets (11). ips[0] only (21) |
 | battle/ended | participants on engine_quit/crash ✓. Placeholder on Lost/timeout (10) | dedup by battleId ✓. Clears rejoin (21) |
 
-## Coverage
+## Model notes
+
+### Open points
+
+- AH-20: lobby `joinBattle`'s `full` flag is not an autohost answer; an addPlayer failure maps to `internal_error`.
+- AH-05 / AH-12: if "repeat this step" reuses the battleId, `battle_already_exists` and the engine-instance
+  ambiguity apply. Recommended: a fresh battleId per start attempt.
+
+### Coverage
 
 Witnesses run on `autohost_up` unless noted. "witnessed" = a `// @witness` line passes in check.sh.
 
@@ -282,7 +307,7 @@ Witnesses run on `autohost_up` unless noted. "witnessed" = a `// @witness` line 
 
 Events and effects: autohost/update `start`, `finished`, `player_left`, `engine_quit` and `engine_crash` are each witnessed (`updateSeen`). A resent update dropped by idempotency is witnessed (`resentUpdateIgnored`), and so are an ended battle with a winner (`endedWithWinner`), Lost + battle/ended (`battleLost`), a late start killed (`lateStartKilled`), and autohost/status reporting maxBattles 0 below currentBattles (`statusDraining`). Both autohosts busy is witnessed on `autohost_two` (`twoHostsBusy`). battle/start and battle/ended recipients are checked by `safety` and by the transcripts `happyPathTest`, `addKickTest` and `graceLostKillTest`.
 
-## Seeded mutations
+### Seeded mutations
 
 Each mutation was applied alone, run with `./check.sh` (or the named check), then reverted.
 
@@ -296,7 +321,7 @@ Each mutation was applied alone, run with `./check.sh` (or the named check), the
 | M6 | idempotency off: `if (n.time <= b.lastTime)` -> `if (false)` | transcript `resendTest` (`dupIgnored == 1`) and witness `resentUpdateIgnored`. `safety` alone does NOT catch it: resends are harmless today because `started` is guarded and ended battles leave the PRunning branch |
 | M7 | revert AH-12: `mayRun: b.attempts > 1` -> `mayRun: false` at engine end | transcript `instanceAmbiguityTest`. Random `safety` found it once (that is how AH-12 was found), but missed it in 2 × 20000 samples, so the transcript was added |
 
-## Cross-module interface
+### Cross-module interface
 
 What this module assumes about other groups' state, as predicates:
 
@@ -308,12 +333,7 @@ What this module assumes about other groups' state, as predicates:
 - The user's session must be able to receive battle/start, i.e. the user is connected or recovers it through `user/self.currentBattle` (session module).
 - Autohost identities: an autohost is a bot account (authorization.md "Client Credentials Grant") with exactly one connection. The user/session modules never see it.
 
-## Requests to the orchestrator
-
-- Lobby module: please note AH-20. `joinBattle`'s `full` flag is not an autohost answer; an addPlayer failure maps to `internal_error`.
-- Matchmaking module: AH-05/AH-12. If "repeat this step" reuses the battleId, `battle_already_exists` and the engine-instance ambiguity apply. Recommend a fresh battleId per attempt.
-
-## Apalache
+### Apalache
 
 `JVM_ARGS=-Xmx6G quint verify --main=autohost_small --invariant=safety --max-steps=3`
 (2 users, 1 autohost, 1 battle id, 1 engine, starting connected) passes in
@@ -321,7 +341,7 @@ about 57 s (`--max-steps=2`: 51 s). The directive is `steps=3`. Three steps from
 the connected state reach a running battle (request, autohost handling, Ok
 response), but not the reconnect scenarios. Those are covered by simulation and the transcripts.
 
-## Integration changes
+### Integration changes
 
 Made by the integration step (findings/system.md, decisions INT-D1..D5):
 

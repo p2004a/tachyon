@@ -10,8 +10,8 @@ the tests under `teiserver/test/` that pin the behaviour. I also read the cited 
 Verdicts:
 - **C**: CONFIRMED.
 - **CM**: CONFIRMED-MINOR (true, but cosmetic, unobservable, or allowed by a "may/can").
-- **P**: PARTIAL (the core is true, but a detail is wrong, or the "protocol" side is only the orchestrator's
-  design default and not Tachyon text).
+- **P**: PARTIAL (the core is true, but a detail is wrong, or the "protocol" side is only a
+  proposed default (README.md, PD-nn) and not Tachyon text).
 - **R**: REFUTED.
 - **U**: UNVERIFIABLE.
 
@@ -20,9 +20,9 @@ Severity is given for confirmed and partial entries:
 - **Medium**: wrong reason or event, recoverable.
 - **Low**: everything else.
 
-**A systematic caveat.** Several entries measure teiserver against the orchestrator's *design defaults*: the
-activity slot, the 256-member limit, battles that survive an autohost disconnect, full-state resend after
-reconnect, and majority-of-players results. These are **not** in Tachyon (`grep` over `docs/` and `src/schema/`
+**A systematic caveat.** Several entries measure teiserver against *proposed defaults* (README.md): the
+activity slot (PD-03), the 256-member limit (PD-04), battles that survive an autohost disconnect (PD-10), full-state
+resend after reconnect (PD-08), and majority-of-players results (PD-11). These are **not** in Tachyon (`grep` over `docs/` and `src/schema/`
 finds none of them). Those entries are marked P (or R when nothing else is left). They should go to protocol owners
 as proposals ("Gap"), not as implementation divergences.
 
@@ -37,31 +37,31 @@ as proposals ("Gap"), not as implementation divergences.
 | PARTY-07 | P | Low | Code true (the session process answers even while detached or in battle). Whether this violates "connected" depends on an undefined term |
 | PARTY-08 | C | Medium | No self check in kick (`party/server.ex:328-349`) and no empty check. A lone self-kick leaves a member-less party process alive |
 | PARTY-10 | C | Low | `src/schema/party/leave.ts:8-9` says no-op. teiserver answers `invalid_request "Not in a party"` |
-| PARTY-13 | C | Medium | The `{:removed}` cast (`session.ex:1469-1476`) never demonitors `:current_party`. A later DOWN sends `party/removed {partyId: nil}` (see also NEW-01) |
+| PARTY-13 | C | Medium | The `{:removed}` cast (`session.ex:1469-1476`) never demonitors `:current_party`. A later DOWN sends `party/removed {partyId: nil}` (see also PARTY-22, was NEW-01) |
 | PARTY-15 | C | High | `matchmaking_notify_cancel` is never called from `remove_member` or from the `start_match` success or failure paths. The party stays locked until the queue process dies (the only test that unlocks is "queue crash reset party matchmaking state") |
 | PARTY-16 | C | High | Kick touches neither the party's `matchmaking` nor the kicked session's queue state. The kicked user stays inside the party's queue ticket |
 | PARTY-17 | CM | Low | `events/leave.ex:33` demonitors `leaver_id`, not `{:member, id}`. The later DOWN re-sends an unchanged `party/updated` (the session's `<=` version check lets it through) |
 | PARTY-18 | C | High | `session.ex:704` and `:827` return `{:reply, x}` with no state, so the session crashes. `:704` is reachable by any user (= MSG-04) |
 | LOBBY-01 | C | Low | Current schema default is `true`. teiserver uses `|| false`, and its vendored v0 schema has no default (drift). bar-lobby always sends the field |
 | LOBBY-02 | C | Medium | Confirmed for every listed command (`tachyon_handler.ex:833,843,980-1055,1087`) |
-| LOBBY-03 | P | Medium | Code true. The "activity slot" is a design default, not Tachyon. Only `matchmaking/queue`'s `already_in_battle` reason implies part of it |
+| LOBBY-03 | P | Medium | Code true. The "activity slot" is proposed default PD-03, not Tachyon. Only `matchmaking/queue`'s `already_in_battle` reason implies part of it |
 | LOBBY-04 | C | Medium | No `lobby/voteCancel` clause, so the catch-all returns `command_unimplemented`. bar-lobby sends it (`lobby.store.ts:567`) |
 | LOBBY-05 | C | Medium | `lobby.ex:756` requires a boss whenever `boss_enabled?`, even with no boss present, against lobby.md:118 |
 | LOBBY-06 | P | Low | Code true. lobby.md only says boss presence "may" disable commands, and nothing says startBattle is vote-gated |
 | LOBBY-07 | C | Medium | kickban/appointBoss never check `current_vote`. `start_vote.ex:21` overwrites it, and the old vote gets no voteEnded |
 | LOBBY-08 | C | Medium | Three capacity notions: `max_teams` (`lobby.ex:524,683`), sum of `max_players` (`:1399`), and both (`update_ally_team_config.ex:33`) |
-| LOBBY-10 | R | – | No 256 limit exists in Tachyon. 251 (bots included) is a defensible engine limit. Design-default mismatch only |
+| LOBBY-10 | R | – | No 256 limit exists in Tachyon. 251 (bots included) is a defensible engine limit. Mismatch with proposed default PD-04 only |
 | LOBBY-11 | C | Medium | `move_player.ex:33` keeps `ready?`. `:42` broadcasts `ready?: false`. Server and clients disagree |
 | LOBBY-14 | C | Low | `lobby.ex:1705-1708` voters = non-bot players only. A spectator initiator is not included (contradicts `currentVote.ts:18`) |
 | LOBBY-17 | C | Low | `lobby.ex:1211` and the events count bots. `:1337` does not. 5 s batching confirmed (allowed) |
 | LOBBY-20 | CM | Low | `battle_already_started` and `no_autohost` become `invalid_request`. The schema offers nothing better except `internal_error` |
 | LOBBY-22 | CM | Low | True, but lobby.md says voteEnded exists "if they want to show a notification", which is optional for clients |
 | LOBBY-23 | P | Low | Code true. `playerCount` is undefined in Tachyon, so this is a teiserver vs bar-lobby disagreement, not a protocol divergence |
-| LOBBY-25 | P | Medium | Code true. "Full state after user/self" is a design default, and Tachyon is silent |
+| LOBBY-25 | P | Medium | Code true. "Full state after user/self" is proposed default PD-08, and Tachyon is silent |
 | LOBBY-26 | C | High | `vote_ended.ex:80-81` adds the boss with no membership check. Only kick votes are cancelled on leave. The ghost boss locks update, kickban and appointBoss, and the ghost cannot be unbossed (`unboss` needs a member target) |
 | MM-10 | P | Low | Code true. Tachyon is silent on a repeated `ready`, so this diverges from the model's assumption only |
 | MM-16 | P | Low | Code true. `queue.ts` itself is contradictory (MM-01), and teiserver implements the `already_queued` reading. bar-lobby part true |
-| MM-17 | P | Medium | "Queue while in battle succeeds" contradicts the `already_in_battle` reason (C). The lobby part is a design default |
+| MM-17 | P | Medium | "Queue while in battle succeeds" contradicts the `already_in_battle` reason (C). The lobby part is proposed default PD-03 |
 | MM-18 | C | High | After `lost`, a party member's rejoin hits `queue_server.ex:327-368` with no pending slot, gets `invalid_party`, then `cancelled(server_error)` |
 | MM-19 | C | High | Same root as PARTY-15. `pairing_room.ex:121-182` never unlocks. `already_queued` reaches the client via `tachyon_handler.ex:394-395` |
 | MM-20 | C | Medium | No checkAssets anywhere. README says members "will receive" it |
@@ -72,14 +72,14 @@ as proposals ("Gap"), not as implementation divergences.
 | MM-25 | R | – | The session's `{:stop, :normal, ...}` after `system/disconnect` fires the queue's `{:player, id}` monitor (kept until `disband_pairing`). `remove_member` → `PairingRoom.cancel`: the room is cancelled at once |
 | MM-26 | C | High | All four bullets true. Bullet 3 is worse than stated: the party crash propagates into the caller's session (`Party.join_queues` only catches `:noproc`) |
 | MM-27 | CM | Low | `lost` then `cancelled` order confirmed (`session.ex:1288-1289`). Transient UI state only |
-| AH-01 | P | High | Session dies with the connection, and the battle stops 100 ms after DOWN with no kill and no `end_tachyon_match`: true. "No battle/ended" is wrong: players get the placeholder from their session's battle monitor (AH-10). The survival requirement is a design default |
+| AH-01 | P | High | Session dies with the connection, and the battle stops 100 ms after DOWN with no kill and no `end_tachyon_match`: true. "No battle/ended" is wrong: players get the placeholder from their session's battle monitor (AH-10). The survival requirement is proposed default PD-10 |
 | AH-02 | P | Medium | True and pinned by `autohost_test.exs:65`. Tachyon does not say which `since` the server must use. Impact exists only because of AH-01 |
 | AH-03 | P | Medium | True (`autohost/session.ex:296-307`, `:192-194`). Tachyon is silent on unknown battle ids |
 | AH-04 | P | High | Zombie engine path true. "find_autohost load accounting is off" is wrong: `find_autohost` uses the autohost-reported `currentBattles`, which includes the zombie |
 | AH-05 | C | Medium | No retry (`autohost/session.ex:40` TODO). Same as MM-23 |
 | AH-06 | P | Low | True (`autohost.ex:54-61`). Tachyon says nothing about admission or capacity accounting |
 | AH-07 | CM | Low | Never sent and `availableEngines` ignored: true. Nothing in Tachyon obliges the server to send them |
-| AH-08 | P | Medium | Majority of reporters: true (`battle.ex:379-393`). Tachyon defines no aggregation rule (design default) |
+| AH-08 | P | Medium | Majority of reporters: true (`battle.ex:379-393`). Tachyon defines no aggregation rule (proposed default PD-11) |
 | AH-09 | CM | Low | Both ack-handler bugs are real (`autohost/session.ex:337-349`) but latent: in-order acks, no resends while AH-02 holds |
 | AH-10 | C | High | Placeholder `battle/ended` (`player/session.ex:1661-1674`). `:autohost_timeout`/`:battle_timeout` stop without `end_tachyon_match`, so the match result is lost |
 | AH-11 | P | Low | Answer ignored: true. bar-lobby's `internal_error` is in the schema enum (there is no better reason), so this is a Gap |
@@ -87,7 +87,7 @@ as proposals ("Gap"), not as implementation divergences.
 | AH-21 | CM | Low | bar-lobby facts true (dedup `battleHistory.store.ts:18`, `ips[0]`) |
 | SESSION-01 | CM | Low | `:force_disconnect` → `{:stop, :normal}` with no 1008 or reason. connection.md:40 is a "should", for errors |
 | SESSION-03 | C | High | `:connection_timeout` → stop with no `:offline` broadcast. Only `system/disconnect` broadcasts offline |
-| SESSION-05 | P | High | teiserver half true but measured against a design default. bar-lobby half true for friends. "party presence silently stops" is wrong: `logic/party.ts:176` clears and re-attaches on every user/self |
+| SESSION-05 | P | High | teiserver half true but measured against proposed default PD-08. bar-lobby half true for friends. "party presence silently stops" is wrong: `logic/party.ts:176` clears and re-attaches on every user/self |
 | SESSION-06 | C | Medium | `:lobby` status is never broadcast. user/self is hardcoded `:menu` (`tachyon_handler.ex:1110`) |
 | SESSION-09 | P | Low | teiserver sends no response: true (`tachyon_handler.ex:328-332`). The "Divergence-bar-lobby" half is wrong: awaiting the response is what the protocol asks |
 | SESSION-11 | P | Low | The duplicate-id bug is real (`session.ex:731`). Unknown id → `invalid_request` is the only fitting reason, so it is no divergence |
@@ -124,8 +124,9 @@ as proposals ("Gap"), not as implementation divergences.
 
 **Counts (91 scored).** C 49, CM 13, P 24, R 4, U 1.
 
-**Also found by this review (not in any findings file):** NEW-01 (High). A member who joined through
-`acceptInvite` is not monitored as `:current_party`. Details are below.
+**Also found by this review:** NEW-01 (High), now PARTY-22 in findings/party.md. A member who joined through
+`acceptInvite` is not monitored as `:current_party`. Details are below. The `pending_parties` membership test noted
+under MM-26 is now MM-30 in findings/matchmaking.md.
 
 ## Notes: High items, PARTIAL, REFUTED, UNVERIFIABLE
 
@@ -175,7 +176,7 @@ as proposals ("Gap"), not as implementation divergences.
     too**. This needs only a `matchmaking/queue` with an unknown queue id while in a party (the schema accepts any
     string).
   - Bullet 4: the test is `@tag :skip` at `party_matchmaking_test.exs:31-32`.
-  - Additional (not in the finding): `party_id in state.pending_parties` (`queue_server.ex:427`) tests
+  - Additional (not in the finding, now MM-30): `party_id in state.pending_parties` (`queue_server.ex:427`) tests
     `{key, value}` membership of a map, so it is always false.
 - **AH-10.** This is the path behind AH-01 (autohost loss) and the 8 h timeout. The battle stops with no
   `Battle.end_tachyon_match` (`tachyon_battle/battle.ex:317-325`), so the DB match is never closed and reported
@@ -197,7 +198,7 @@ as proposals ("Gap"), not as implementation divergences.
   1. Users *do* get a `battle/ended`. It is AH-10's placeholder, sent by their own session's `{:battle, id}`
      monitor.
   2. Tachyon (`docs/schema/autohost.md`) says nothing about autohost disconnects. "Battles survive with a grace
-     period" is the design default.
+     period" is proposed default PD-10.
 
   Severity stays High: engines keep running untracked, and no kill is possible (AH-03).
 - **AH-04 (P).** Confirmed:
@@ -221,7 +222,7 @@ as proposals ("Gap"), not as implementation divergences.
   is a smaller residual: a party member who is also a friend stays attached through `friendsSymbol`, so no new
   dispatch fires. Lobby members were not checked.
 
-### NEW-01 (found by this review): members who joined via acceptInvite are not monitored as `:current_party`
+### NEW-01 (found by this review, now PARTY-22): members who joined via acceptInvite are not monitored as `:current_party`
 
 - Evidence: `player/session.ex:782` is the only `MC.monitor(..., :current_party)`, on create. The accept path
   (`:870-882`) sets `current_party` but adds no monitor. The `{:invited_to_party, id}` monitor from `:844` is left
@@ -248,13 +249,13 @@ as proposals ("Gap"), not as implementation divergences.
   "Connected player" (party.md:18) is undefined, so this is an ambiguity, not a clear divergence.
 - **LOBBY-03 / MM-17.** No Tachyon text says "a user is in at most one of lobby, queue, battle". The only hook is
   `already_in_battle` in `src/schema/matchmaking/queue.ts:38`, so the MM-17 battle half is a real divergence. The
-  lobby halves and the "lobby battles contradict it" point compare against the design doc.
+  lobby halves and the "lobby battles contradict it" point compare against proposed default PD-03.
 - **LOBBY-06.** lobby.md:110: "some commands **may** be disabled for non-boss players". `voteActions` includes
   `start`, but no text gates startBattle on a vote. This is a Gap.
 - **LOBBY-23.** `lobbyOverview.playerCount` has no description. The disagreement is bar-lobby vs teiserver's
   overview, which LOBBY-17 already covers.
-- **LOBBY-25.** The lobby lifetime across a disconnect is undefined in Tachyon. "Full state after user/self" is a
-  design default. Code facts are right (`tachyon_handler.ex:1121` only `currentLobby`).
+- **LOBBY-25.** The lobby lifetime across a disconnect is undefined in Tachyon. "Full state after user/self" is
+  proposed default PD-08. Code facts are right (`tachyon_handler.ex:1121` only `currentLobby`).
 - **MM-10.** `pairing_room.ex:188-190` → `no_match` on a repeated ready: true. Tachyon has no rule.
 - **MM-16.** `queue.ts:7` "Should cancel the previous queue" and `:36` `already_queued` cannot both hold (MM-01).
   teiserver's choice is one consistent reading, and the test pins it (`matchmaking_test.exs:189-194`).
@@ -283,9 +284,9 @@ as proposals ("Gap"), not as implementation divergences.
 
 ### REFUTED
 
-- **LOBBY-10.** "The design says 256 members" is not in Tachyon (no 256/251 in `docs/schema/lobby.md` or
+- **LOBBY-10.** "256 members" (proposed default PD-04) is not in Tachyon (no 256/251 in `docs/schema/lobby.md` or
   `src/schema/lobby`). teiserver's 251 (`lobby.ex:440-451`, bots counted) is a documented engine constraint. The
-  question is only for the design doc.
+  question is only whether to adopt PD-04.
 - **MM-25.** The claim "in `{:pairing, ...}` it does nothing, so the room waits for the full timeout" overlooks this
   chain:
   1. `handle_call(:disconnect)` returns `{:stop, :normal, :ok, ...}` (`session.ex:604`).
@@ -340,13 +341,13 @@ as proposals ("Gap"), not as implementation divergences.
    - PARTY-18 / MSG-04: 2-tuple reply;
    - MSG-05: unmatched `{:error, :invalid_lobby}`;
    - MM-26 bullet 3: party crash propagates to the session;
-   - NEW-01 effect 1: raise at `session.ex:867`;
+   - PARTY-22 (NEW-01) effect 1: raise at `session.ex:867`;
    - FRIEND-14: `WithClauseError`;
    - AH-09: CaseClauseError in the ack handler;
    - SESSION-21: the transport does not catch handler exceptions, so none of the above gets an `internal_error`
      response.
 3. **Party monitor and timer bookkeeping in the session and the party server** (teiserver). Members:
-   - NEW-01: no `:current_party` monitor on accept;
+   - PARTY-22 (NEW-01): no `:current_party` monitor on accept;
    - PARTY-13: no demonitor on kick;
    - PARTY-17: wrong demonitor key;
    - PARTY-05: timer keyed by user, not by invite.
@@ -361,7 +362,7 @@ as proposals ("Gap"), not as implementation divergences.
 
    One protocol paragraph (what survives a socket loss and a takeover, what is resent, what the client must redo)
    would settle all of them.
-5. **The activity slot is a design default, not Tachyon.** Members: LOBBY-03, MM-17, MM-04 (gap), LOBBY-10 (size).
+5. **The activity slot is proposed default PD-03, not Tachyon.** Members: LOBBY-03, MM-17, MM-04 (gap), LOBBY-10 (size).
    The protocol owners must decide first. Only `already_in_battle` exists today.
 6. **Specific reasons collapsed to `invalid_request`, or never produced** (teiserver `tachyon_handler.ex`).
    Members:
@@ -399,7 +400,7 @@ as proposals ("Gap"), not as implementation divergences.
 2. **[teiserver] User-triggerable crashes.** MSG-04/PARTY-18 (`messaging/send` party while not in a party kills the
    session). MM-26 (an unknown queue id while in a party kills the party and the session; a member leaving during
    the 5 s pending window crashes the whole queue). Add a `rescue` around `handle_command` (SESSION-21).
-3. **[teiserver] NEW-01 + PARTY-13: party membership monitors.** Accepted members are not told when their party
+3. **[teiserver] PARTY-22 (NEW-01) + PARTY-13: party membership monitors.** Accepted members are not told when their party
    dies, then get stuck (cannot leave or create; accepting crashes). A kicked user's stale monitor can later remove
    them from a *different* party on the client only.
 4. **[teiserver] PARTY-03.** A failed `acceptInvite` still removes the user from the current party and cancels

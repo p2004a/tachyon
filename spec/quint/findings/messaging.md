@@ -39,8 +39,7 @@ Checks (`./check.sh messaging.qnt`) give 20 ok and 0 FAIL:
 - 17 witnesses.
 
 `VERIFY=1` additionally runs `quint verify --max-steps=3` on `safety`. It passed with
-`JVM_ARGS=-Xmx6G` in about 68 s. Steps 2 took 24 s; 4 steps were not attempted, as the orchestrator
-asked.
+`JVM_ARGS=-Xmx6G` in about 68 s. Steps 2 took 24 s; 4 steps were not attempted.
 
 `safety` = `reasonsInSchema`, `bufferBounded`, `bufferSound`, `eventsOnlyToAddressed`,
 `sendRecipientsExact`, `noEchoToSender`, `replayOnlyToCaller`, `deliveryOrdered`,
@@ -56,10 +55,11 @@ asked.
 - A8 → MSG-16
 - A9 → MSG-07, MSG-08
 
-## Findings
+## Protocol (Tachyon)
 
 ### MSG-01: `message_too_long` cannot be returned by a schema-validating server; order against `invalid_target` unstated
-- Kind: Contradiction + Divergence-teiserver + Divergence-bar-lobby + Assumption (A2)
+- Kind: Contradiction + Assumption (A2). Not a divergence: both implementations do what the schema forces
+- Review: Partial, Low
 - Evidence:
   - tachyon `src/schema/messaging/send.ts:57-58` `// somewhat arbitrary maxLength, but we need one`
     `message: Type.String({ maxLength: 512 })`. The same file lists the failure
@@ -97,6 +97,7 @@ asked.
 
 ### MSG-03: DM to an offline or unknown user succeeds in teiserver; "online" during grace is unstated
 - Kind: Divergence-teiserver + Gap + Assumption (A3a)
+- Review: Confirmed, Medium
 - Evidence:
   - messaging.md:13: "A message can only be sent to online players." `invalid_target` is the only
     reason that fits.
@@ -109,6 +110,7 @@ asked.
     `Messaging.persist_direct_message(msg, user_id)`, which also runs for a nonexistent `to_id`).
   - `invalid_target` comes only from an unparsable userId (`:1189-1191`).
   - The teiserver tests cover only an online, unsubscribed receiver (`test/teiserver_web/tachyon/messaging_test.exs:26-31`).
+- Implementation part (Divergence-teiserver): a DM to an offline or unknown user is answered `success` and persisted.
 - Spec choice: `online(s, v)` = v has a session, attached or in grace. A DM to a user with no
   session is `invalid_target`. A DM to a detached user is accepted and buffered (ASSUMPTION A3a). This
   matches the marker text, "typically used by clients when they reconnect after a crash to make sure
@@ -119,6 +121,7 @@ asked.
 
 ### MSG-04: Party/lobby message without being a member: teiserver answers `invalid_request`, and the party path crashes the session
 - Kind: Divergence-teiserver + Assumption (A3)
+- Review: Confirmed, High
 - Evidence:
   - The schema has `invalid_target` for this command. Tachyon does not say what "not in a party" gives.
   - teiserver maps every party/lobby error to `invalid_request` (`tachyon_handler.ex:440-449`
@@ -129,22 +132,13 @@ asked.
     session GenServer crashes. Its party, lobby, matchmaking state and message buffer are lost, and the
     caller's `GenServer.call` exits, which also takes down the connection (compare SESSION-21). No test
     sends a party message outside a party.
+- Implementation part (Divergence-teiserver): the `invalid_request` mapping (pinned by the test) and the session
+  crash at `session.ex:704` (= PARTY-18).
 - Spec choice: `sendMessage` answers `invalid_target` when `partyOf(u) == 0` / `lobbyOf(u) == 0`
   (ASSUMPTION A3). Witnesses `sentDenied("party"|"lobby","invalid_target")`; `groupTest`.
 - To verify: fix `session.ex:704` (`{:reply, {:error, "not in party"}, state}`) and add the
   missing test. Protocol owners: decide whether "not a member" is `invalid_target` (our choice) or
   `invalid_request`.
-
-### MSG-05: Lobby message racing a lobby shutdown crashes the session
-- Kind: Divergence-teiserver
-- Evidence: `tachyon_lobby/lobby.ex:1199-1201` `call_lobby` returns `{:error, :invalid_lobby}` (a
-  2-tuple) on `:noproc`/`:shutdown`. `session.ex:721-725` matches only `:ok` and
-  `{:error, :invalid_request, reason}`, so the result is a `CaseClauseError` in the session.
-  `Party.send_message` catches `:noproc` and returns a 3-tuple (`party/server.ex:164-165`), so party
-  is fine here.
-- Spec choice: not modelled (no lobby crash step). The spec answer would be `invalid_target`.
-- To verify: teiserver test: kill the lobby process, then `messaging/send {type: lobby}` → expect a
-  failed response, with the session alive.
 
 ### MSG-06: Who receives: party/lobby members other than the sender; a DM goes to the named user, self included
 - Kind: Assumption (A1) + Gap
@@ -163,27 +157,6 @@ asked.
   `noEchoToSender`. Transcripts `groupTest` and `selfDmTest`.
 - To verify: state in messaging.md: "the sender does not receive its own party/lobby message; a
   message to oneself is delivered".
-
-### MSG-07: teiserver keeps the messaging subscription when a new connection replaces the old one
-- Kind: Divergence-teiserver (+ Divergence-bar-lobby: no de-duplication)
-- Evidence:
-  - The subscription is bound to the socket on abrupt disconnect (`session.ex:1563-1567` puts
-    `subscribed?` to false). The test says the same: `messaging_test.exs:48` "subscription is bound to
-    ws connection".
-  - But `handle_call({:replace, new_conn_pid}, ...)` (`session.ex:558-581`) demonitors the old
-    socket with `:flush`, so that DOWN never runs, and it keeps `messaging_state` unchanged. The
-    replacing socket therefore receives `messaging/received` before it has subscribed
-    (`session.ex:1419-1421`).
-  - bar-lobby subscribes on every connect with its last marker (`chat.store.ts:52`, `:92-95`). A live
-    message that reaches the new socket after the client sent `subscribeReceived` with marker M, but
-    before the server handled it, is sent again in the marker replay. bar-lobby does not de-duplicate
-    (`insertMessage`, `chat.store.ts:198-207`, pushes unconditionally), so the user sees the message
-    twice.
-- Spec choice: `takeover` (and `reconnect`) start the socket unsubscribed (ASSUMPTION A9).
-  `nothingBeforeSubscribe` also checks the client's own `sub` flag. Seeded mutation M5 (takeover keeps
-  `subscribed`) is caught by that invariant and by `resumeTest`.
-- To verify: teiserver test: subscribe, connect a second socket with the same token, DM → the new
-  socket must get nothing until it subscribes. Fix: reset `subscribed?` in the `:replace` handler.
 
 ### MSG-08: Lifetime of the messaging subscription is unspecified, and it differs from user/subscribeUpdates
 - Kind: Gap + Assumption (A9)
@@ -223,6 +196,7 @@ asked.
 
 ### MSG-10: `hasMissedMessages` for `from_start`/`latest`: description covers markers only; teiserver reports a sticky overflow flag
 - Kind: Gap + Divergence-teiserver + Assumption (A7)
+- Review: Confirmed-minor, Low
 - Evidence:
   - The response description says only "set to true when the marker sent doesn't match any message
     stored by the server".
@@ -231,6 +205,8 @@ asked.
     (`bounded_queue.ex:83-85`, cleared only by `out`).
   - bar-lobby knows this and ignores the flag for non-marker requests (`chat.store.ts:127-132`: "the
     flag stays set for the rest of the session once its buffer has overflowed even once").
+- Implementation part (Divergence-teiserver, minor): the sticky `dropped?` flag, a reasonable extension of an
+  under-specified flag.
 - Spec choice: `false` for `latest` and `from_start`, as the description literally says (`history`).
 - To verify: decide whether `from_start` should report "the buffer has lost messages", and if so
   whether that means "since the last subscription" or "ever".
@@ -247,22 +223,6 @@ asked.
   `missed = true`. This keeps `noDuplicateAfterMarker`: if the client's last marker has been dropped,
   every message still in the buffer was sent after it (`resumeTest`, last step; `missedTest`).
 - To verify: add "if the marker is unknown, the whole buffer is sent and hasMissedMessages is true".
-
-### MSG-12: teiserver markers are not unique, so marker resume can re-deliver
-- Kind: Divergence-teiserver
-- Evidence:
-  - The marker is `:erlang.monotonic_time(:micro_seconds)`, read independently in the sender's
-    connection process (`tachyon_handler.ex:427`), in the party process (`party/server.ex:424`) and in
-    the lobby process (`tachyon_lobby/lobby.ex:835`).
-  - Erlang monotonic time is not strictly increasing between calls. It can repeat within one
-    microsecond, across processes, and across nodes, where it also has a different offset. So two
-    messages in one recipient's buffer can carry the same marker.
-  - `BQ.split_when(buffer, &(&1.marker == marker))` (`session.ex:686`, `bounded_queue.ex:127-150`)
-    cuts at the first equal marker. Resuming from the later of two equal markers therefore re-sends it.
-- Spec choice: markers are unique message ids (`nextId`). With equal markers, `noDuplicateAfterMarker`
-  would fail (compare mutation M2, which re-sends the marker's own message).
-- To verify: use `:erlang.unique_integer([:monotonic, :positive])` (or a per-session counter). The
-  protocol could state "markers are unique per recipient".
 
 ### MSG-13: Ordering guarantees are not stated
 - Kind: Gap + Assumption
@@ -284,8 +244,75 @@ asked.
 - To verify: state "per recipient, messages from one target arrive in send order; a replay is in buffer
   order and precedes later live messages".
 
+### MSG-16: Re-subscribing, and the absence of unsubscribe
+- Kind: Gap + Assumption (A8)
+- Evidence:
+  - There is no `messaging/unsubscribeReceived`, and nothing says what a second `subscribeReceived`
+    does.
+  - teiserver accepts it and replays again (`session.ex:663-696`). The `invalid_request` it could
+    return is never used.
+  - bar-lobby re-subscribes after failures (`chat.store.ts:138-148`).
+- Spec choice: always `Ok` with a fresh replay; the client's log restarts (`dmTest`, `missedTest`).
+- To verify: state that subscribing again is allowed and idempotent apart from the replay.
+
+## Implementation (teiserver b36429f, bar-lobby ee58acd)
+
+Entries under Protocol that also carry an implementation part (marked in the entry): MSG-03, MSG-04, MSG-10.
+
+### MSG-05: Lobby message racing a lobby shutdown crashes the session
+- Kind: Divergence-teiserver
+- Review: Confirmed, Medium
+- Evidence: `tachyon_lobby/lobby.ex:1199-1201` `call_lobby` returns `{:error, :invalid_lobby}` (a
+  2-tuple) on `:noproc`/`:shutdown`. `session.ex:721-725` matches only `:ok` and
+  `{:error, :invalid_request, reason}`, so the result is a `CaseClauseError` in the session.
+  `Party.send_message` catches `:noproc` and returns a 3-tuple (`party/server.ex:164-165`), so party
+  is fine here.
+- Spec choice: not modelled (no lobby crash step). The spec answer would be `invalid_target`.
+- To verify: teiserver test: kill the lobby process, then `messaging/send {type: lobby}` → expect a
+  failed response, with the session alive.
+
+### MSG-07: teiserver keeps the messaging subscription when a new connection replaces the old one
+- Kind: Divergence-teiserver (+ Divergence-bar-lobby: no de-duplication)
+- Review: Confirmed, Medium
+- Evidence:
+  - The subscription is bound to the socket on abrupt disconnect (`session.ex:1563-1567` puts
+    `subscribed?` to false). The test says the same: `messaging_test.exs:48` "subscription is bound to
+    ws connection".
+  - But `handle_call({:replace, new_conn_pid}, ...)` (`session.ex:558-581`) demonitors the old
+    socket with `:flush`, so that DOWN never runs, and it keeps `messaging_state` unchanged. The
+    replacing socket therefore receives `messaging/received` before it has subscribed
+    (`session.ex:1419-1421`).
+  - bar-lobby subscribes on every connect with its last marker (`chat.store.ts:52`, `:92-95`). A live
+    message that reaches the new socket after the client sent `subscribeReceived` with marker M, but
+    before the server handled it, is sent again in the marker replay. bar-lobby does not de-duplicate
+    (`insertMessage`, `chat.store.ts:198-207`, pushes unconditionally), so the user sees the message
+    twice.
+- Spec choice: `takeover` (and `reconnect`) start the socket unsubscribed (ASSUMPTION A9).
+  `nothingBeforeSubscribe` also checks the client's own `sub` flag. Seeded mutation M5 (takeover keeps
+  `subscribed`) is caught by that invariant and by `resumeTest`.
+- To verify: teiserver test: subscribe, connect a second socket with the same token, DM → the new
+  socket must get nothing until it subscribes. Fix: reset `subscribed?` in the `:replace` handler.
+
+### MSG-12: teiserver markers are not unique, so marker resume can re-deliver
+- Kind: Divergence-teiserver
+- Review: Confirmed, Low
+- Evidence:
+  - The marker is `:erlang.monotonic_time(:micro_seconds)`, read independently in the sender's
+    connection process (`tachyon_handler.ex:427`), in the party process (`party/server.ex:424`) and in
+    the lobby process (`tachyon_lobby/lobby.ex:835`).
+  - Erlang monotonic time is not strictly increasing between calls. It can repeat within one
+    microsecond, across processes, and across nodes, where it also has a different offset. So two
+    messages in one recipient's buffer can carry the same marker.
+  - `BQ.split_when(buffer, &(&1.marker == marker))` (`session.ex:686`, `bounded_queue.ex:127-150`)
+    cuts at the first equal marker. Resuming from the later of two equal markers therefore re-sends it.
+- Spec choice: markers are unique message ids (`nextId`). With equal markers, `noDuplicateAfterMarker`
+  would fail (compare mutation M2, which re-sends the marker's own message).
+- To verify: use `:erlang.unique_integer([:monotonic, :positive])` (or a per-session counter). The
+  protocol could state "markers are unique per recipient".
+
 ### MSG-14: bar-lobby resumes with `latest` whenever it holds any chat but no marker, which skips missed messages
 - Kind: Divergence-bar-lobby
+- Review: Confirmed, Medium
 - Evidence:
   - `chat.store.ts:92-104`: with no `lastMarker`, `resumePoint` picks `latest` if `hasStoredMessages()`.
   - That check counts chats that contain only the user's own locally inserted messages (`marker: ""`,
@@ -302,6 +329,7 @@ asked.
 
 ### MSG-15: Lobby fan-out uses a node-local session registry (multi-node only)
 - Kind: Divergence-teiserver (only for a multi-node deployment)
+- Review: Unverifiable, Low
 - Evidence:
   - Lobby calls run on the lobby's primary node (`tachyon_lobby/lobby.ex:1190-1196`,
     `Cluster.primary_apply`).
@@ -309,20 +337,18 @@ asked.
     uses a node-local `Registry` (`player/session_registry.ex:8-18`). Recipients whose session lives on
     another node are therefore silently skipped, and the sender still gets `success`.
 - Spec choice: not modelled (no nodes). `sendRecipientsExact` states the intended recipient set.
-- To verify: confirm whether sessions and lobbies can live on different nodes in production.
+- To verify: confirm whether sessions and lobbies can live on different nodes in production. Test: a 2-node cluster
+  where a lobby member's session lives on the non-primary node, then `messaging/send {type: lobby}`; the member
+  must receive the message.
 
-### MSG-16: Re-subscribing, and the absence of unsubscribe
-- Kind: Gap + Assumption (A8)
-- Evidence:
-  - There is no `messaging/unsubscribeReceived`, and nothing says what a second `subscribeReceived`
-    does.
-  - teiserver accepts it and replays again (`session.ex:663-696`). The `invalid_request` it could
-    return is never used.
-  - bar-lobby re-subscribes after failures (`chat.store.ts:138-148`).
-- Spec choice: always `Ok` with a fresh replay; the client's log restarts (`dmTest`, `missedTest`).
-- To verify: state that subscribing again is allowed and idempotent apart from the replay.
+## Model notes
 
-## Coverage
+### Open points
+
+- A composed client must re-send `messaging/subscribeReceived` after every `user/self`: `env/reconnect` and
+  `env/takeover` drop the messaging subscription (MSG-07, MSG-08, system.md INT-11).
+
+### Coverage
 
 | Command | Outcome | Status |
 |---|---|---|
@@ -347,7 +373,7 @@ asked.
 | env/reconnect, env/takeover, env/sessionExpired | – | witnessed (`lastCmd==...`) |
 | buffer overflow | – | witnessed `bufferOverflowed`; `missedTest` |
 
-## Seeded mutations
+### Seeded mutations
 
 All were run against the file and then reverted (the file was compared against a saved copy).
 
@@ -362,7 +388,7 @@ All were run against the file and then reverted (the file was compared against a
 M5 was not caught by the first draft, whose invariant used only the server's flag. The client-side
 `sub` ghost was added to catch it.
 
-## Cross-module interface
+### Cross-module interface
 
 Predicates over this module's state `s` for a user `u`:
 
@@ -387,17 +413,7 @@ Predicates over this module's state `s` for a user `u`:
 - Guaranteed to others: `messaging/send` and `subscribeReceived` change no lobby, party or session
   state apart from the messaging buffer and subscription flag.
 
-## Requests to the orchestrator
-
-- session.qnt / party.qnt: note in their interface that `env/reconnect` and `env/takeover` drop the
-  messaging subscription (MSG-07/MSG-08). A composed client must re-send `messaging/subscribeReceived`
-  after `user/self`.
-- lobby.qnt: findings/lobby.md said `env/sessionEnded` happens on "grace period expired, or replaced".
-  This module, like session.qnt, keeps the session (and the message buffer) on replacement. Settled by
-  INT-D1 (lobby.md corrected, step renamed `env/sessionExpired`).
-- No changes requested to `common.qnt` or `schema.qnt`.
-
-## Integration changes
+### Integration changes
 
 Made by the integration step (findings/system.md, decisions INT-D1..D5):
 

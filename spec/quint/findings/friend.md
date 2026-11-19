@@ -25,21 +25,11 @@ steps x 50000 samples, 27 witnesses at 30 steps x up to 200000 samples), about 2
 `quint verify --main=friend3 --invariant=safety --max-steps=2` passes in 208 s (JVM_ARGS=-Xmx6G, with another
 Apalache run in parallel); 3 steps was not attempted within the time budget.
 
-## Findings
+## Protocol (Tachyon)
 
-### FRIEND-01: friend/remove of a non-friend succeeds in teiserver; the schema has `not_in_friendlist`
-- Kind: Divergence-teiserver
-- Evidence: schema `friend/remove/response.json` reasons include `"not_in_friendlist"`
-  (src/schema/friend/remove.ts:17). teiserver `player/tachyon_handler.ex:634-641`:
-  `%Account.Friend{} = friend <- Account.get_friend(...)` ... `else nil -> {:response, state}`; test
-  `test/teiserver_web/tachyon/friend_test.exs` "is no-op if not friend" asserts `"status" => "success"`.
-  `not_in_friendlist` is never produced anywhere in teiserver.
-- Spec choice: `remove` denies with `not_in_friendlist` (witness `hit("friend/remove",Failed("not_in_friendlist"))`).
-- To verify: either teiserver returns `not_in_friendlist`, or Tachyon drops the reason and documents remove as
-  idempotent.
-
-### FRIEND-02: `invalid_user` only for unparsable ids in accept/reject/cancel/remove (teiserver)
-- Kind: Divergence-teiserver
+### FRIEND-02: `invalid_user` is undefined; teiserver uses it only for unparsable ids in accept/reject/cancel/remove
+- Kind: Gap (Tachyon never defines `invalid_user`: "no such user" or "malformed id"; teiserver's reading noted)
+- Review: Partial, Low
 - Evidence: sendRequest uses `get_user/1` (`tachyon_handler.ex:1236-1243`: parse **and** `Account.get_user`),
   but acceptRequest/rejectRequest/cancelRequest/remove only `TachyonParser.parse_user_id`
   (`:588, :602, :621, :635`; `helpers/tachyon_parser.ex:27-31`: `Integer.parse`). A well-formed id of no user
@@ -51,7 +41,8 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
   friend README.
 
 ### FRIEND-03: What the two capacities count is not defined; teiserver counts friends + requests, both ways
-- Kind: Gap + Divergence-teiserver (bar-lobby agrees with the spec)
+- Kind: Gap + Divergence-bar-lobby (message text)
+- Review: Partial, Low
 - Evidence: Tachyon only has the reason names `outgoing_capacity_reached`, `incoming_capacity_reached`
   (src/schema/friend/sendRequest.ts:18-19), no description. teiserver
   `account/libs/friend_request_lib.ex:71-75`: `check_relationship_limit(from_id, :friend)` ->
@@ -63,8 +54,11 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
   "Too many outgoing friend requests" / "User has too many incoming requests" (per-direction pending
   requests). teiserver test "request when outgoing capacity reached" reaches the limit with 2 **friends** and
   0 requests.
+- Implementation part (Divergence-bar-lobby): bar-lobby's text "Too many outgoing friend requests" does not fit
+  teiserver's meaning (friends + incoming + outgoing ≥ 300). teiserver's counting is a choice Tachyon leaves open,
+  not a divergence.
 - Spec choice: ASSUMPTION — `MAX_OUTGOING` bounds the caller's pending outgoing requests, `MAX_INCOMING` the
-  target's pending incoming requests (server settings); outgoing checked first (`sendRequest`,
+  target's pending incoming requests (server settings, proposed default PD-07 in README.md); outgoing checked first (`sendRequest`,
   invariant `withinCapacity`).
 - To verify: protocol owners pick one definition and write it in the sendRequest description; bar-lobby's
   message is wrong for teiserver's definition (a user with 300 friends is told "too many outgoing requests").
@@ -79,7 +73,8 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
 - To verify: if a cap is intended, add a reason (e.g. `friendlist_full`) to acceptRequest and sendRequest.
 
 ### FRIEND-05: Self-targeting
-- Kind: Assumption + Divergence-teiserver
+- Kind: Assumption (Tachyon is silent on self-targeting; teiserver behaviour noted)
+- Review: Partial, Low
 - Evidence: Tachyon is silent. teiserver: sendRequest to self -> `invalid_user` (`friend_request_lib.ex:54`;
   test "request to self"); accept/reject from self -> `no_pending_request`, cancel to self -> success, remove
   self -> success (only parse checks, FRIEND-02).
@@ -89,18 +84,21 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
 
 ### FRIEND-06: Repeated request to the same user has no reason; teiserver says `already_in_friendlist`
 - Kind: Gap + Divergence-teiserver + Divergence-bar-lobby (message)
+- Review: Confirmed, Low
 - Evidence: sendRequest reasons have nothing for "request already pending". teiserver
   `friend_request_lib.ex:60-63`: "Check for existing outgoing request" -> `{false, :already_in_friendlist}`.
   bar-lobby shows `already_in_friendlist` as "Already friends with this user" (`en.json:2423`,
   `components/navbar/Friends.vue:204`), which is false for a pending request.
+- Implementation part (Divergence-teiserver, Divergence-bar-lobby): teiserver answers a repeated request with
+  `already_in_friendlist`, and bar-lobby shows that as "Already friends".
 - Spec choice: ASSUMPTION — `invalid_request`, per README convention (no specific reason)
   (`sendRequest`, witness `hit("friend/sendRequest",Failed("invalid_request"))`). Idempotent success would also
   be reasonable.
 - To verify: add `already_requested` to sendRequest, or document success-no-op.
 
 ### FRIEND-07: Mutual requests: the second request accepts the first — protocol silent; reply can't tell
-- Kind: Gap + Assumption (design default; teiserver matches)
-- Evidence: Tachyon says nothing. Design default "the second request accepts the first". teiserver
+- Kind: Gap + Proposed default (PD-06; teiserver matches)
+- Evidence: Tachyon says nothing. Proposed default PD-06 (README.md): "the second request accepts the first". teiserver
   `account.ex:1985-2053` (`create_friend_request`: `case get_friend_request(to_user_id, from_user_id)` ->
   `accept_friend_request(existing_request)` -> `{:ok, :auto_accepted}`) and `tachyon_handler.ex:562-564`:
   `requestAccepted` to the target (from = caller) **and** to the caller (from = target). Test
@@ -129,7 +127,8 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
   a grace-period reconnect (no notification is queued). Consistent with SESSION-05.
 
 ### FRIEND-09: cancelRequest has no `no_pending_request`; teiserver answers success
-- Kind: Gap + Divergence-teiserver
+- Kind: Gap (Divergence-teiserver refuted: cancelRequest has no "not found" reason in Tachyon, so teiserver's idempotent success is as valid as the model's `invalid_request`)
+- Review: Refuted
 - Evidence: cancelRequest reasons: `invalid_user` + generic (src/schema/friend/cancelRequest.ts:14), while
   accept/reject list `no_pending_request`. teiserver `tachyon_handler.ex:625-626` `{:error, "no request"} ->
   {:response, state}`; test "cancel non existant request" ("it's a no-op").
@@ -147,46 +146,15 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
   sendRequest Ok for an existing friend). `mutualRequestTest` uses event-first.
 - To verify: docs/commands.md could say whether events caused by a request may precede its response.
 
-### FRIEND-11: teiserver checks capacities before auto-accept: a mutual request can fail spuriously
-- Kind: Divergence-teiserver
-- Evidence: `account.ex:1986` `can_send_friend_request_with_reason?` (with the limit checks at
-  `friend_request_lib.ex:71-75`) runs before the auto-accept branch (`account.ex:1990`). Auto-accept turns one
-  pending request into one friendship for each user, so teiserver's count (FRIEND-03) is unchanged, yet a user
-  at the limit gets `outgoing_capacity_reached` for `sendRequest` to someone who already asked them (while
-  `acceptRequest` would succeed).
-- Spec choice: no capacity check on the auto-accept branch (`capacityTest`: c's request to a, whose outgoing
-  set is full, auto-accepts).
-- To verify: teiserver test: limit 1, b -> a pending, a sends to b -> expect success.
-
-### FRIEND-12: Friend changes made outside Tachyon produce no Tachyon events
-- Kind: Divergence-teiserver
-- Evidence: Tachyon events are emitted only from `tachyon_handler.ex:560-564, 590, 604, 623, 638`. The same
-  data is changed by the web UI (`teiserver_web/live/account/profile/overview.ex:125, 255, 317`,
-  `live/account/relationship/index.ex:97, 311`) and the Spring protocol (`protocols/spring/spring_user_in.ex:22,
-  42, 52`); those paths broadcast only on PubSub `account_user_relationships:<id>`, which only the Spring
-  server subscribes to (`protocols/spring/spring_out.ex:768`); no file in `lib/teiserver/player/` subscribes.
-  An Online Tachyon client stays stale until reconnect.
-- Spec choice: the model has only Tachyon commands, so every change emits its events.
-- To verify: teiserver test: Tachyon client A, web/Spring user B sends A a request -> expect
-  `friend/requestReceived` at A.
-
-### FRIEND-13: Ignore/avoid makes sendRequest fail with `invalid_user`; protocol silent
-- Kind: Gap + Divergence-teiserver
+### FRIEND-13: Ignore/avoid makes sendRequest fail with `invalid_user` in teiserver; protocol silent
+- Kind: Gap (Tachyon is silent on ignore/avoid; teiserver's `invalid_user` is a choice, noted)
+- Review: Partial, Low
 - Evidence: `friend_request_lib.ex:65-69` `does_a_ignore_b?(to_id, from_id)` / `does_a_avoid_b?` ->
   `:invalid_user`; tests "request to user who ignores sender/avoids sender". privateUser has `ignoreIds` but
   no friend text mentions ignoring; teiserver also sends `ignoreIds: []` in user/self
   (`tachyon_handler.ex:1116`).
 - Spec choice: not modelled (no ignore relation in Tachyon commands).
 - To verify: decide whether a block is reported as `invalid_user` (hides the block, as teiserver) and write it.
-
-### FRIEND-14: teiserver error handling gaps in acceptRequest/rejectRequest/cancelRequest
-- Kind: Divergence-teiserver
-- Evidence: acceptRequest's `with ... else` (`tachyon_handler.ex:592-597`) matches only `{:error, :invalid_id}`
-  and `{:error, "no request"}`; `accept_friend_request/1` can return `{:error, "Failed to create friendship:
-  ..."}` (`friend_request_lib.ex:112-113`) -> `WithClauseError` crash instead of `internal_error`.
-  cancelRequest turns every unexpected error into `invalid_user` (`:628-629`).
-- Spec choice: n/a (storage errors not modelled).
-- To verify: add catch-all `err -> internal_error` like rejectRequest (`:612-615`).
 
 ### FRIEND-15: user/self duplicates friend/list (without timestamps for friends); README says to call friend/list
 - Kind: Contradiction (minor)
@@ -198,8 +166,69 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
 - Spec choice: both give `serverView`; `listData` = view at the step; connect/reconnect reset the view.
 - To verify: say user/self is sufficient (and drop the README sentence) or drop the fields from privateUser.
 
+### FRIEND-17: `requestCancelled` is described more broadly than cancel
+- Kind: Gap
+- Evidence: friend/requestCancelled: "Notify the player that a friend request they received is no longer
+  valid" (not "was cancelled"). Only cancelRequest sends it in teiserver (`tachyon_handler.ex:623`); a request
+  also disappears when the sender is deleted/anonymised (`account/tasks/delete_user_task.ex`,
+  `gdpr_pseudo_anonymise_task.ex`) without any event.
+- Spec choice: sent only by `cancelRequest` (`eventsMatchCommand`).
+- To verify: list the causes (cancel, sender deleted, sender blocked by target...).
+
+## Implementation (teiserver b36429f, bar-lobby ee58acd)
+
+Entries under Protocol that also carry an implementation part (marked in the entry): FRIEND-03, FRIEND-06.
+
+### FRIEND-01: friend/remove of a non-friend succeeds in teiserver; the schema has `not_in_friendlist`
+- Kind: Divergence-teiserver
+- Review: Confirmed, Low
+- Evidence: schema `friend/remove/response.json` reasons include `"not_in_friendlist"`
+  (src/schema/friend/remove.ts:17). teiserver `player/tachyon_handler.ex:634-641`:
+  `%Account.Friend{} = friend <- Account.get_friend(...)` ... `else nil -> {:response, state}`; test
+  `test/teiserver_web/tachyon/friend_test.exs` "is no-op if not friend" asserts `"status" => "success"`.
+  `not_in_friendlist` is never produced anywhere in teiserver.
+- Spec choice: `remove` denies with `not_in_friendlist` (witness `hit("friend/remove",Failed("not_in_friendlist"))`).
+- To verify: either teiserver returns `not_in_friendlist`, or Tachyon drops the reason and documents remove as
+  idempotent.
+
+### FRIEND-11: teiserver checks capacities before auto-accept: a mutual request can fail spuriously
+- Kind: Divergence-teiserver
+- Review: Confirmed, Low
+- Evidence: `account.ex:1986` `can_send_friend_request_with_reason?` (with the limit checks at
+  `friend_request_lib.ex:71-75`) runs before the auto-accept branch (`account.ex:1990`). Auto-accept turns one
+  pending request into one friendship for each user, so teiserver's count (FRIEND-03) is unchanged, yet a user
+  at the limit gets `outgoing_capacity_reached` for `sendRequest` to someone who already asked them (while
+  `acceptRequest` would succeed).
+- Spec choice: no capacity check on the auto-accept branch (`capacityTest`: c's request to a, whose outgoing
+  set is full, auto-accepts).
+- To verify: teiserver test: limit 1, b -> a pending, a sends to b -> expect success.
+
+### FRIEND-12: Friend changes made outside Tachyon produce no Tachyon events
+- Kind: Divergence-teiserver
+- Review: Confirmed, Medium
+- Evidence: Tachyon events are emitted only from `tachyon_handler.ex:560-564, 590, 604, 623, 638`. The same
+  data is changed by the web UI (`teiserver_web/live/account/profile/overview.ex:125, 255, 317`,
+  `live/account/relationship/index.ex:97, 311`) and the Spring protocol (`protocols/spring/spring_user_in.ex:22,
+  42, 52`); those paths broadcast only on PubSub `account_user_relationships:<id>`, which only the Spring
+  server subscribes to (`protocols/spring/spring_out.ex:768`); no file in `lib/teiserver/player/` subscribes.
+  An Online Tachyon client stays stale until reconnect.
+- Spec choice: the model has only Tachyon commands, so every change emits its events.
+- To verify: teiserver test: Tachyon client A, web/Spring user B sends A a request -> expect
+  `friend/requestReceived` at A.
+
+### FRIEND-14: teiserver error handling gaps in acceptRequest/rejectRequest/cancelRequest
+- Kind: Divergence-teiserver
+- Review: Confirmed, Low
+- Evidence: acceptRequest's `with ... else` (`tachyon_handler.ex:592-597`) matches only `{:error, :invalid_id}`
+  and `{:error, "no request"}`; `accept_friend_request/1` can return `{:error, "Failed to create friendship:
+  ..."}` (`friend_request_lib.ex:112-113`) -> `WithClauseError` crash instead of `internal_error`.
+  cancelRequest turns every unexpected error into `invalid_user` (`:628-629`).
+- Spec choice: n/a (storage errors not modelled).
+- To verify: add catch-all `err -> internal_error` like rejectRequest (`:612-615`).
+
 ### FRIEND-16: bar-lobby keeps a stale incoming entry after an auto-accept, and drops entries on any error
 - Kind: Divergence-bar-lobby
+- Review: Confirmed, Medium
 - Evidence: `store/me.store.ts:127-131` `sendRequest`: on success always
   `me.outgoingFriendRequestUserIds.add(to)`; `:100-103` `onFriendRequestAcceptedEvent` deletes from outgoing
   and adds the friend but never deletes from `incomingFriendRequestUserIds`. After b's request to a was
@@ -214,16 +243,7 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
 - To verify: bar-lobby: in `onFriendRequestAcceptedEvent` also `incomingFriendRequestUserIds.delete(from)`;
   in `sendRequest` skip the add if `to` is already a friend or was in incoming.
 
-### FRIEND-17: `requestCancelled` is described more broadly than cancel
-- Kind: Gap
-- Evidence: friend/requestCancelled: "Notify the player that a friend request they received is no longer
-  valid" (not "was cancelled"). Only cancelRequest sends it in teiserver (`tachyon_handler.ex:623`); a request
-  also disappears when the sender is deleted/anonymised (`account/tasks/delete_user_task.ex`,
-  `gdpr_pseudo_anonymise_task.ex`) without any event.
-- Spec choice: sent only by `cancelRequest` (`eventsMatchCommand`).
-- To verify: list the causes (cancel, sender deleted, sender blocked by target...).
-
-## Implementation check per command
+### Implementation check per command
 
 | Command | teiserver (tachyon_handler.ex) | bar-lobby (store/me.store.ts) |
 |---|---|---|
@@ -235,7 +255,14 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
 | remove | `:634-652`; event `removed` to the other only (matches); non-friend -> success (01); (02) | `:175-188` alert on error |
 | events | `:190-208`, `session.ex:268-312, 1429-1438`; dropped unless socket up (08); none for web/Spring changes (12) | `:95-118, 232-236`; requestAccepted keeps incoming (16) |
 
-## Coverage
+## Model notes
+
+### Open points
+
+- This module's `views` is a friend-only client view reset on user/self, like session.qnt's `views`;
+  system.qnt does not compose client views.
+
+### Coverage
 
 | Command | Outcome | Status |
 |---|---|---|
@@ -254,7 +281,7 @@ Apalache run in parallel); 3 steps was not attempted within the time budget.
 | event lost | to Detached / to Offline | witnessed `eventLostInGrace`, `eventDropped` |
 | friend list beyond caps | 3 friends | `noFriendCapTest` (witness `multipleFriends`; full circle too rare for simulation) |
 
-## Seeded mutations
+### Seeded mutations
 
 All run with `quint test --main=friend4` and `quint run --invariant=safety --max-steps=30 --max-samples=50000`,
 then reverted (file byte-identical to the checked one before the final samples tweak).
@@ -271,7 +298,7 @@ then reverted (file byte-identical to the checked one before the final samples t
 | M8 | client: sendRequest Ok always adds outgoing (bar-lobby `me.store.ts:129`) | `viewsInSync` (event-first order); mutualRequestTest |
 | M10 | auto-accept sends no `requestAccepted` to the caller | only mutualRequestTest (a careful client does not need it; FRIEND-07) |
 
-## Cross-module interface
+### Cross-module interface
 
 - Presence is session.qnt's: `Online(u) ⇔ attached(s,u)`, `Detached(u) ⇔ online(s,u) ∧ ¬attached(s,u)`,
   `Offline(u) ⇔ ¬online(s,u)`. Steps `env/connect`, `env/disconnect`, `env/reconnect`, `env/sessionExpired`
@@ -287,14 +314,7 @@ then reverted (file byte-identical to the checked one before the final samples t
 - Assumed of other groups: nothing about lobby/party/matchmaking; friend relations do not depend on activity.
   `USERS` = session.qnt `ACCOUNTS`; `GHOST` = its non-account id.
 
-## Requests to the orchestrator
-
-- session.qnt: confirm that `user/self` is sent on `env/connect`, `env/reconnect` and `env/takeover` (this
-  module relies on it for FRIEND-08).
-- If the orchestrator composes a "client view" across modules, this module's `views` is a friend-only view
-  reset on user/self, like session.qnt's `views`.
-
-## Integration changes
+### Integration changes
 
 Made by the integration step (findings/system.md, decisions INT-D1..D5):
 

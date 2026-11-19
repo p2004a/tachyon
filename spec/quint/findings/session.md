@@ -22,10 +22,11 @@ validation (requests are schema-valid by construction); `internal_error`/`comman
 Constants in `session_test`: accounts a, b, c, d plus the non-account id x; `MAX_SUBS = 2` (protocol: 100);
 d's token has no `tachyon.lobby`; c is restricted from reporting.
 
-## Findings
+## Protocol (Tachyon)
 
 ### SESSION-01: Second connection replaces the first — Tachyon says nothing; teiserver closes the old socket silently
-- Kind: Assumption (design default) + Divergence-teiserver (close without reason)
+- Kind: Proposed default (PD-01) + Divergence-teiserver (close without reason, minor)
+- Review: Confirmed-minor, Low
 - Evidence: `docs/connection.md` has no section on sessions or multiple connections. teiserver
   `player/tachyon_handler.ex:1141-1171` (`setup_session` → `Session.replace_connection` →
   `force_disconnect(old_conn_pid)`) and `player/registry.ex:33-44` (`register_and_kill_existing`). The old
@@ -34,6 +35,8 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
   reason, while `connection.md:40-42` asks for code `1008` plus a description when a peer terminates.
   bar-lobby treats any close as a fault and reconnects every 10 s (`logic/connection.ts:200-218`,
   `:77-93`), so two running clients on one account take the session from each other in a loop.
+- Implementation part (Divergence-teiserver, minor): the old socket is closed with no 1008 and no reason.
+  connection.md:40 is a "should", stated for errors.
 - Spec choice: `takeover` (= `openSocket` on an attached session): old socket's pending requests dropped,
   session (subscriptions, activity) kept, `user/self` + full `user/updated` to the new socket.
 - To verify: add to connection.md: "a new connection for the same user replaces the old one; the server
@@ -50,17 +53,6 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 - Spec choice: untimed `env/disconnect` / `env/reconnect` / `env/sessionExpired`.
 - To verify: state the grace period (or a minimum) in connection.md, and the client-side liveness bound.
 
-### SESSION-03: Grace expiry sends no user/updated "offline": subscribers see the user online forever
-- Kind: Divergence-teiserver
-- Evidence: `session.ex:1695-1702` `:connection_timeout` → `{:stop, :normal, state}`, with no
-  `broadcast_user_update!(…, :offline)`. Only `system/disconnect` broadcasts offline (`session.ex:601`).
-  The test `user_test.exs:264` "when target disconnects" uses `Tachyon.disconnect!` (= `system/disconnect`,
-  `test/support/tachyon.ex:311-315`); no test covers a dropped socket.
-- Spec choice: `sessionExpired` → `endSession` → `notifyChanges` sends `user/updated {status: offline}` to
-  attached subscribers. Seeded mutation M2 (no event) violates `viewsFresh`.
-- To verify: teiserver test: subscribe to B, abrupt_disconnect B, send `:connection_timeout` → expect
-  `user/updated` offline.
-
 ### SESSION-04: Status during the grace period is unchanged
 - Kind: Assumption
 - Evidence: the status enum (`definitions/user.json`) is `offline | menu | playing | lobby`, no
@@ -69,35 +61,29 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 - Spec choice: `statusOf` = "offline" iff no session; `socketDrop` produces no `user/updated`.
 - To verify: should a detached user show as offline (they cannot answer invites, votes, ready checks)?
 
-### SESSION-05: Reconnect full-state resend does not cover subscriptions; clients cannot tell resumed from fresh sessions
-- Kind: Assumption (design default) + Gap + Divergence-teiserver + Divergence-bar-lobby
-- Evidence: design default "after reconnect the server sends full state following user/self";
-  user.md:387 only says user/self "should be sent to a user when they login". teiserver drops events while
-  detached (`session.ex:1910-1918` `send_to_player`: "TODO tachyon_mvp: what should server do if the
-  connection is down at that time? The best is likely to store it…") and on reconnect sends only
-  `user/self` (`tachyon_handler.ex:91-103`); subscriptions persist in the session (`session.ex:89`) but no
-  `user/updated` is resent, so updates missed during grace are lost. `user/self` (privateUser.json) has no
-  subscription list and no "resumed" flag, so a client cannot know whether its subscriptions still exist.
-  bar-lobby never resubscribes: `subsManager.attach` dispatches only for ids not already attached
-  (`utils/subscriptions-manager.ts:18-32`); `processFriendData` on user/self re-attaches the same ids
-  (`store/me.store.ts:77-93`) → no request. Lists are only cleared on a deliberate go-offline
-  (`me.store.ts:121-123`, `:222`). After a grace expiry, friend/lobby/party presence silently stops.
+### SESSION-05: Reconnect: no full-state resend for subscriptions (PD-08); clients cannot tell resumed from fresh sessions; bar-lobby never re-subscribes friends
+- Kind: Proposed default (PD-08) + Gap + Divergence-bar-lobby (friends)
+- Review: Partial, High
+- Evidence: proposed default PD-08 (README.md): after a reconnect the server sends full state following
+  `user/self`. Tachyon promises no resend: user.md:387 only says user/self "should be sent to a user when they
+  login". teiserver drops events while detached (`session.ex:1910-1918` `send_to_player`: "TODO tachyon_mvp: what
+  should server do if the connection is down at that time? The best is likely to store it…") and on reconnect
+  sends only `user/self` (`tachyon_handler.ex:91-103`); subscriptions persist in the session (`session.ex:89`) but
+  no `user/updated` is resent, so updates missed during grace are lost. That is noted against PD-08, not a
+  divergence. `user/self` (privateUser.json) has no subscription list and no "resumed" flag, so a client cannot
+  know whether its subscriptions still exist.
+- Implementation part (Divergence-bar-lobby, friends): after a grace *expiry* the new session has no
+  subscriptions, and bar-lobby never re-subscribes friends. `processFriendData` on user/self
+  (`store/me.store.ts:77-93`) calls `subsManager.attach` (`:47-50`), which dispatches only for ids not already
+  attached (`utils/subscriptions-manager.ts:18-32`), so the same ids send no request. The friend list is cleared
+  only by `clearOnlineState` on a deliberate go-offline (`me.store.ts:121-123`, `:222`). Party presence is not
+  affected: `logic/party.ts:171-178` clears `partySymbol` and re-attaches on every `user/self`. A smaller residual
+  remains: a party member who is also a friend stays attached through `friendsSymbol`, so no new dispatch fires.
+  Lobby members were not checked.
 - Spec choice: `openSocket` sends `user/self` and a full `user/updated` for every subscription; the client
   resets its view on `user/self`. M1 (no resend) violates `viewsFresh` and fails `graceReconnectTest`.
 - To verify: either resend `user/updated` for all subscriptions after `user/self`, or say subscriptions end
   with the socket and clients resubscribe after every `user/self`.
-
-### SESSION-06: Status "lobby" is never produced by teiserver; user/self status is always "menu"
-- Kind: Divergence-teiserver
-- Evidence: `broadcast_user_update!` is called only with `:menu`, `:playing`, `:offline`
-  (`session.ex:65, 601, 1385, 1401, 1442, 1675, 1975`); joining a lobby broadcasts nothing.
-  `user/info` status is `:menu` or `:playing` (`session.ex:761-770`). `user/self` hardcodes
-  `status: :menu` (`tachyon_handler.ex:1110`) even when the session is in a lobby or a battle
-  (`currentLobby`/`currentBattle` are set from the same state, `:1121-1127`).
-- Spec choice: `statusOf` maps lobby → "lobby", playing → "playing"; `eventsCurrent` checks `Self(status)`.
-  M7 (Self always "menu") violates `eventsCurrent` and fails `playingGraceTest`.
-- To verify: teiserver test: join a lobby, subscriber gets `status: lobby`; reconnect during battle →
-  user/self status `playing`.
 
 ### SESSION-07: A user who is playing keeps the session past the grace period
 - Kind: Assumption (as teiserver) — disagrees with party.qnt
@@ -115,15 +101,18 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 - Spec choice: `endSession` resets `activity` to Menu (`offlineIsIdle`).
 
 ### SESSION-09: system/disconnect gets no response; whether it ends the session is unstated
-- Kind: Divergence-teiserver + Divergence-bar-lobby + Gap
+- Kind: Gap + Divergence-teiserver (no response)
+- Review: Partial, Low
 - Evidence: system.md:11 "Ask the server to terminate the connection." The schema has a success response.
   commands.md:14 requests "expect the other side to send a correlating response command".
   teiserver `tachyon_handler.ex:328-332`: `Session.disconnect(…)` then `{:stop, :normal, state}`: no
   response. It also ends the session immediately (`session.ex:114-124` "Cleanly disconnect the user,
   clearing any state", `:588-605`), which system.md does not say. `data.reason` is ignored. bar-lobby
   awaits the response (`tachyon-client.ts:358-371`), which is then rejected with `socket_closed` when the
-  socket closes (`:160-166`) and logged as "Error sending disconnect command"; bar-lobby relies on the
+  socket closes (`:160-166`) and logged as "Error sending disconnect command". Awaiting the response is what commands.md:14
+  asks, so this is not a bar-lobby divergence; bar-lobby relies on the
   session ending (`logic/connection.ts:112-115` "Choosing to go offline is what ends it").
+- Implementation part (Divergence-teiserver): no response to `system/disconnect` (`tachyon_handler.ex:328-332`).
 - Spec choice: `disconnect` answers Ok, then ends the session (no grace) — ASSUMPTION SESSION-09. M4 (no
   response) violates `responseCorrelated` and fails `disconnectTest`.
 - To verify: system.md: "ends the session; the server responds, then closes with 1000".
@@ -135,13 +124,17 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 - Spec choice: `serverStats` = number of users that are not offline (consistent with SESSION-04).
 
 ### SESSION-11: subscribeUpdates with an id that names no user; duplicates in one request
-- Kind: Assumption + Divergence-teiserver
+- Kind: Assumption (unknown id) + Divergence-teiserver (duplicate ids)
+- Review: Partial, Low
 - Evidence: the schema's reasons are `subscription_limit_reached` plus the generic four; no `unknown_user`.
   teiserver answers `invalid_request` for unknown or non-numeric ids (`tachyon_handler.ex:653-669`,
   `session.ex:728-741`). Duplicated ids in one request (`["5","5"]`, allowed by the schema: no
   `uniqueItems`) make `Enum.count(users) != Enum.count(user_ids)` true (`session.ex:731`;
   `TachyonParser.parse_user_ids` does not dedupe), so the request fails with
   `invalid_request "invalid user ids: "` (empty list).
+- Implementation part (Divergence-teiserver): the duplicate-id failure (`Account.query_users` dedupes,
+  `Enum.count(user_ids)` does not). Unknown id → `invalid_request` is the only fitting reason, so that half is no
+  divergence.
 - Spec choice: unknown id → `invalid_request` (ASSUMPTION SESSION-11); ids are a set.
 - To verify: add `unknown_user` to subscribeUpdates, or document `invalid_request`; add `uniqueItems`.
 
@@ -170,8 +163,83 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 - Spec choice: `report` follows teiserver's order; self → `invalid_request` (ASSUMPTION SESSION-13).
 - To verify: list the report types in the schema (enum).
 
+### SESSION-15: messageId uniqueness and responses to unknown ids
+- Kind: Assumption + Contradiction (typo)
+- Evidence: commands.md:9 spells the property `messsageId` (the schemas use `messageId`) and :30 describes
+  `status` as "A object containing data specific to the command". Uniqueness scope is not stated (per
+  connection? per session?). teiserver does not check request ids; a client response to an id it has no
+  pending request for closes the socket with 1008 (`tachyon/transport.ex:241-246`). bar-lobby uses
+  `randomUUID()` (`tachyon-client.ts:186`) and logs unmatched responses (`:330-337`).
+- Spec choice: fresh messageIds (`newReq`), `pendingMidsUnique`.
+
+### SESSION-18: user/updated payload does not match the schema; teiserver ships an older "v0" schema
+- Kind: Divergence-teiserver + Contradiction (same version, two schemas) + Divergence-bar-lobby
+- Review: Confirmed, Medium
+- Evidence: `tachyon_handler.ex:210-226` sends `country` (schema: `countryCode`), `clanId: nil` (schema:
+  `clanBaseData`), `displayName = username`. `user/info` and `user/self` also send `clanId`
+  (`:486`, `:1108`), while tachyon `definitions/user.json` *requires* `clanBaseData`. teiserver validates
+  against `priv/tachyon/v0/schema/definitions/user.json` (`"required": [... "clanId" ...]`), an older
+  copy; both call themselves `v0` (connection.md:30). bar-lobby merges `{...user}` into its db
+  (`store/users.store.ts:33-47`), so it stores a stray `country` key and `countryCode` stays "??".
+- Implementation part (Divergence-teiserver, Divergence-bar-lobby): `country` instead of `countryCode` is wrong even
+  against teiserver's own v0 schema; `clanId` vs `clanBaseData` is the schema drift. bar-lobby stores the stray
+  `country` key.
+- Spec choice: not modelled (only `status`).
+- To verify: bump the protocol version for breaking schema changes; teiserver: send `countryCode`.
+
+### SESSION-19: Requests before user/self: teiserver's login queue answers invalid_request
+- Kind: Gap (Tachyon is silent on requests before user/self; teiserver and bar-lobby behaviour noted)
+- Review: Partial, Low
+- Evidence: teiserver may admit a socket without a session (`tachyon_handler.ex:78-89`, `LoginQueue`);
+  until then every message gets `invalid_request "waiting for login"` (`:318-326`), including events and
+  requests the client will retry. Tachyon does not say whether a client may send before `user/self`.
+  bar-lobby counts the socket as connected on `open` (`tachyon-client.ts:132-137`) and immediately sends
+  `system/serverStats` and pending subscriptions (`logic/connection.ts:186-198`).
+- Spec choice: the socket and `user/self` arrive in one step (`openSocket`), so there is no window.
+- To verify: connection.md: "the client must not send requests before user/self", or a queued status.
+
+### SESSION-22: user/self is also sent when roles change; nothing tells a client its own status
+- Kind: Gap (Divergence-teiserver refuted: user.md:387 "should be sent ... when they login" sets a minimum and does not forbid other sends, such as on a role change)
+- Review: Refuted
+- Evidence: user.md:387 user/self "should be sent to a user when they login". teiserver also sends it on
+  a role change (`tachyon_handler.ex:228-231`, `session.ex:1446-1449`). A user's own status (menu → lobby
+  → playing) reaches them only via user/updated if they subscribe to themselves; nothing says that is
+  allowed or needed. bar-lobby takes identity from every user/self (`main/services/tachyon.service.ts:15-27`,
+  `store/me.store.ts:62-74`).
+- Spec choice: `selfOnlyOnLogin` (user/self only on connect/reconnect/takeover); self-subscription allowed.
+
+## Implementation (teiserver b36429f, bar-lobby ee58acd)
+
+Entries under Protocol that also carry an implementation part (marked in the entry): SESSION-01, SESSION-05, SESSION-09, SESSION-11, SESSION-18.
+
+### SESSION-03: Grace expiry sends no user/updated "offline": subscribers see the user online forever
+- Kind: Divergence-teiserver
+- Review: Confirmed, High
+- Evidence: `session.ex:1695-1702` `:connection_timeout` → `{:stop, :normal, state}`, with no
+  `broadcast_user_update!(…, :offline)`. Only `system/disconnect` broadcasts offline (`session.ex:601`).
+  The test `user_test.exs:264` "when target disconnects" uses `Tachyon.disconnect!` (= `system/disconnect`,
+  `test/support/tachyon.ex:311-315`); no test covers a dropped socket.
+- Spec choice: `sessionExpired` → `endSession` → `notifyChanges` sends `user/updated {status: offline}` to
+  attached subscribers. Seeded mutation M2 (no event) violates `viewsFresh`.
+- To verify: teiserver test: subscribe to B, abrupt_disconnect B, send `:connection_timeout` → expect
+  `user/updated` offline.
+
+### SESSION-06: Status "lobby" is never produced by teiserver; user/self status is always "menu"
+- Kind: Divergence-teiserver
+- Review: Confirmed, Medium
+- Evidence: `broadcast_user_update!` is called only with `:menu`, `:playing`, `:offline`
+  (`session.ex:65, 601, 1385, 1401, 1442, 1675, 1975`); joining a lobby broadcasts nothing.
+  `user/info` status is `:menu` or `:playing` (`session.ex:761-770`). `user/self` hardcodes
+  `status: :menu` (`tachyon_handler.ex:1110`) even when the session is in a lobby or a battle
+  (`currentLobby`/`currentBattle` are set from the same state, `:1121-1127`).
+- Spec choice: `statusOf` maps lobby → "lobby", playing → "playing"; `eventsCurrent` checks `Self(status)`.
+  M7 (Self always "menu") violates `eventsCurrent` and fails `playingGraceTest`.
+- To verify: teiserver test: join a lobby, subscriber gets `status: lobby`; reconnect during battle →
+  user/self status `playing`.
+
 ### SESSION-14: No subscription cap in teiserver; bar-lobby has none either
 - Kind: Divergence-teiserver + Divergence-bar-lobby
+- Review: Confirmed, Low
 - Evidence: user.md:684 "A maximum of 100 userIds can be subscribed to at any given time." teiserver
   unions without a bound (`session.ex:743`) and never returns `subscription_limit_reached`. The schema's
   `maxItems: 100` only bounds one request. bar-lobby subscribes all friends and friend requests in one
@@ -182,17 +250,9 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
   `subsCapped` and fails `subscriptionLimitTest`.
 - To verify: teiserver test: subscribe 101 distinct users in two requests → `subscription_limit_reached`.
 
-### SESSION-15: messageId uniqueness and responses to unknown ids
-- Kind: Assumption + Contradiction (typo)
-- Evidence: commands.md:9 spells the property `messsageId` (the schemas use `messageId`) and :30 describes
-  `status` as "A object containing data specific to the command". Uniqueness scope is not stated (per
-  connection? per session?). teiserver does not check request ids; a client response to an id it has no
-  pending request for closes the socket with 1008 (`tachyon/transport.ex:241-246`). bar-lobby uses
-  `randomUUID()` (`tachyon-client.ts:186`) and logs unmatched responses (`:330-337`).
-- Spec choice: fresh messageIds (`newReq`), `pendingMidsUnique`.
-
 ### SESSION-16: Subscribing broadcasts the target's state to all its subscribers, with status forced to "menu"
 - Kind: Divergence-teiserver
+- Review: Confirmed, Medium
 - Evidence: `do_subscribe_updates` (`session.ex:1964-1982`) either broadcasts `:offline` on the target's
   PubSub topic itself, or casts `{:user, :get_subscribe_state}` to the target, which broadcasts
   `broadcast_user_update!(state.user, :menu)` on its topic (`session.ex:1441-1443`). Every existing
@@ -206,33 +266,14 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 
 ### SESSION-17: unsubscribeUpdates "should always succeed", teiserver can fail it
 - Kind: Divergence-teiserver
+- Review: Confirmed, Low
 - Evidence: user.md:871 "This should always succeed." `tachyon_handler.ex:671-687` returns
   `invalid_request` for non-numeric ids; test `user_test.exs:290` "unsubscribe invalid id" asserts it.
 - Spec choice: `unsubscribe` is always Ok (unknown ids ignored; `subscriptionLimitTest`).
 
-### SESSION-18: user/updated payload does not match the schema; teiserver ships an older "v0" schema
-- Kind: Divergence-teiserver + Contradiction (same version, two schemas) + Divergence-bar-lobby
-- Evidence: `tachyon_handler.ex:210-226` sends `country` (schema: `countryCode`), `clanId: nil` (schema:
-  `clanBaseData`), `displayName = username`. `user/info` and `user/self` also send `clanId`
-  (`:486`, `:1108`), while tachyon `definitions/user.json` *requires* `clanBaseData`. teiserver validates
-  against `priv/tachyon/v0/schema/definitions/user.json` (`"required": [... "clanId" ...]`), an older
-  copy; both call themselves `v0` (connection.md:30). bar-lobby merges `{...user}` into its db
-  (`store/users.store.ts:33-47`), so it stores a stray `country` key and `countryCode` stays "??".
-- Spec choice: not modelled (only `status`).
-- To verify: bump the protocol version for breaking schema changes; teiserver: send `countryCode`.
-
-### SESSION-19: Requests before user/self: teiserver's login queue answers invalid_request
-- Kind: Gap + Divergence-teiserver + Divergence-bar-lobby
-- Evidence: teiserver may admit a socket without a session (`tachyon_handler.ex:78-89`, `LoginQueue`);
-  until then every message gets `invalid_request "waiting for login"` (`:318-326`), including events and
-  requests the client will retry. Tachyon does not say whether a client may send before `user/self`.
-  bar-lobby counts the socket as connected on `open` (`tachyon-client.ts:132-137`) and immediately sends
-  `system/serverStats` and pending subscriptions (`logic/connection.ts:186-198`).
-- Spec choice: the socket and `user/self` arrive in one step (`openSocket`), so there is no window.
-- To verify: connection.md: "the client must not send requests before user/self", or a queued status.
-
 ### SESSION-20: teiserver answers events
 - Kind: Divergence-teiserver
+- Review: Confirmed, Low
 - Evidence: commands.md:45 "Events are commands which require no response". The fallback clause
   (`tachyon_handler.ex:1096-1098`) and the transport's schema errors (`transport.ex:211-238`) reply with
   an error *response* to any message, events included.
@@ -240,6 +281,7 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 
 ### SESSION-21: A crash inside a command handler gives no response
 - Kind: Divergence-teiserver
+- Review: Confirmed, Medium
 - Evidence: `transport.ex:270-313`: the `try … rescue` that sends `internal_error` wraps only
   `handle_result`; `state.handler.handle_command(...)` (`:273-280`) runs outside it, so an exception (e.g.
   a `GenServer.call` to a dead session) kills the connection without a response, breaking "every request
@@ -247,16 +289,9 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
   probably meant 10 s.
 - Spec choice: every served request has exactly one response (`responseCorrelated`, `requestResolved`).
 
-### SESSION-22: user/self is also sent when roles change; nothing tells a client its own status
-- Kind: Gap + Divergence-teiserver
-- Evidence: user.md:387 user/self "should be sent to a user when they login". teiserver also sends it on
-  a role change (`tachyon_handler.ex:228-231`, `session.ex:1446-1449`). A user's own status (menu → lobby
-  → playing) reaches them only via user/updated if they subscribe to themselves; nothing says that is
-  allowed or needed. bar-lobby takes identity from every user/self (`main/services/tachyon.service.ts:15-27`,
-  `store/me.store.ts:62-74`).
-- Spec choice: `selfOnlyOnLogin` (user/self only on connect/reconnect/takeover); self-subscription allowed.
+## Model notes
 
-## Coverage
+### Coverage
 
 | Command / step | Outcome | Status |
 |---|---|---|
@@ -288,7 +323,7 @@ d's token has no `tachyon.lobby`; c is restricted from reporting.
 witnesses: all green, ~1.5 min. `VERIFY=1`: `quint verify --max-steps=2` passes in 2 min 21 s with
 `JVM_ARGS=-Xmx6G` (directive `@verify … steps=2`); 3 steps was not tried within the time budget.
 
-## Seeded mutations
+### Seeded mutations
 
 Each was applied to a scratch copy (one edit), run with `quint test` and `quint run --invariant=safety`
 (30 steps, 20000 samples), then per-conjunct to name the catching invariant.
@@ -303,7 +338,7 @@ Each was applied to a scratch copy (one edit), run with `quint test` and `quint 
 | M6 | user/updated to every attached user, not only subscribers | 4 tests; `updatedToSubscribersOnly` |
 | M7 | user/self status always "menu" (teiserver, SESSION-06) | test playingGraceTest; `eventsCurrent` |
 
-## Cross-module interface
+### Cross-module interface
 
 Presence, as the other modules see it: `Online(u) ⇔ attached(s,u)`, `Detached(u) ⇔ online(s,u) ∧
 ¬attached(s,u)`, `Offline(u) ⇔ ¬online(s,u)`.
@@ -328,14 +363,7 @@ Presence, as the other modules see it: `Online(u) ⇔ attached(s,u)`, `Detached(
 - After `env/reconnect`/`env/takeover`, every group's full state follows user/self in the same delivery
   (party/lobby/matchmaking resync from user/self fields; this group adds user/updated per subscription).
 
-## Requests to the orchestrator
-
-- Settle one session vocabulary across modules: party uses `env/sessionExpired`, lobby and matchmaking
-  `env/sessionEnded`, and lobby treats a replaced connection as a session end; this module's mapping is
-  above.
-- Decide whether "playing keeps the session" (SESSION-07) applies to party/lobby/matchmaking too.
-
-## Integration changes
+### Integration changes
 
 Made by the integration step (findings/system.md, decisions INT-D1..D5):
 
@@ -345,4 +373,5 @@ Made by the integration step (findings/system.md, decisions INT-D1..D5):
 - SESSION-07 ("playing keeps the session") is adopted for every module as INT-D2, still an Assumption.
   Lobby and matchmaking guard their `sessionExpired` with it; party, messaging and friend have no battle
   notion and system.qnt guards the composed step.
-- Both requests above are settled by INT-D1/INT-D2.
+- The two cross-module questions this module raised (one session vocabulary; whether "playing keeps the session"
+  applies to every module) are settled by INT-D1/INT-D2.
